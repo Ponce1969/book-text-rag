@@ -27,6 +27,7 @@ from typing import NoReturn
 from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
 from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
 from book_text_rag.adapters.storage.sqlite import SqliteStore
+from book_text_rag.application.get_document import EstadoPorVersionNoDefinido, get_document
 from book_text_rag.application.health import exigir_disponible, health
 from book_text_rag.application.index_version import index_version_de_resultados
 from book_text_rag.application.ingest_persistent import ingest_persistent
@@ -426,6 +427,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="mostrar un fragmento concreto por su ordinal, con su contenido completo",
     )
 
+    ficha = subparsers.add_parser(
+        "document",
+        help="mostrar la ficha pública de un documento (D-07)",
+        description=(
+            "Proyecta los siete campos públicos de un documento: identificador, versión resuelta, "
+            "origen, formato, páginas, identidad del índice y estado. Sin --document-version resuelve "
+            "la única versión registrada; con varias versiones exige indicarla. "
+            "No muestra fragmentos, contenido ni rutas."
+        ),
+        epilog=_CODIGOS_SALIDA_CATALOGO,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+    )
+    _agregar_ayuda(ficha)
+    ficha.add_argument("--store", required=True, help="ruta explícita del almacén SQLite")
+    ficha.add_argument("--document-id", required=True, help="identificador explícito del documento")
+    ficha.add_argument(
+        "--document-version",
+        help="document_version completa o un prefijo único entre las versiones registradas",
+    )
+
     catalogo = subparsers.add_parser(
         "documents",
         help="listar los documentos del almacén sin modificarlo",
@@ -573,6 +595,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("\n".join(lineas))
             return 0
 
+        if args.command == "document":
+            exigir_disponible(store)
+            # La ficha de un identificador no registrado es `document_not_found` (D-07/D-13): el mismo
+            # mapeo que aplica `get_document` cuando `read_document` responde `referencia_ausente`.
+            try:
+                versiones = store.read_document(str(args.document_id)).versions
+            except StoreError as error:
+                if error.code is StoreErrorCode.REFERENCIA_AUSENTE:
+                    raise StoreError(
+                        StoreErrorCode.DOCUMENT_NOT_FOUND,
+                        "el documento no está registrado en el catálogo",
+                        document_id=str(args.document_id),
+                    ) from error
+                raise
+            solicitada = args.document_version
+            version_pedida: str | None = (
+                _resolver_version_solicitada(versiones, str(solicitada)) if solicitada is not None else None
+            )
+            vista = get_document(store, str(args.document_id), version_pedida)
+            print(f"document_id: {vista.document_id}")
+            print(f"document_version: {vista.document_version or '(sin versiones)'}")
+            print(f"title: {vista.title if vista.title is not None else '(no declarado)'}")
+            print(f"source_format: {vista.source_format if vista.source_format is not None else '(no declarado)'}")
+            print(f"page_count: {vista.page_count if vista.page_count is not None else '(no declarado)'}")
+            print(f"index_version: {vista.index_version or '(no calculado)'}")
+            print(f"status: {vista.status.value}")
+            return 0
+
         if args.command == "show":
             exigir_disponible(store)
             version_resuelta = _resolver_version_solicitada(
@@ -595,6 +645,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("comando no soportado")  # pragma: no cover - argparse lo impide
     except ValueError as error:
         print(f"error [uso]: {error}", file=sys.stderr)
+        return 2
+    except EstadoPorVersionNoDefinido as error:
+        # N ≥ 2 versiones con versión explícita: CD-02/M-14 sigue abierto, no hay respuesta pública
+        # que construir y ningún código de D-07 lo describe. Se informa sin inventar estado ni código.
+        print(f"sin respuesta: {error}", file=sys.stderr)
         return 2
     except (StoreError, IngestError) as error:
         _reportar_error(error)
