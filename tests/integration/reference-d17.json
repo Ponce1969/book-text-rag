@@ -1,0 +1,63 @@
+{
+  "configuration": {
+    "chunking_config_version": "f4f32cbc06d6",
+    "extractor": [
+      "pdftotext",
+      "4.00",
+      "-layout -enc UTF-8"
+    ],
+    "geometry_tool": "PyMuPDF 1.26.7",
+    "manifest_canonical": "{\"schema\":\"chunking_config/v3\",\"segmentation_unit\":\"hierarchy_leaf\",\"heading_start\":true,\"split_boundary\":\"paragraph_within_unit\",\"parent_own_text\":\"own_fragment\",\"table_blocks\":\"atomic\",\"excluded_regions\":[\"front_matter\",\"back_matter\",\"index\"],\"overlap_scope\":\"same_unit\",\"count_unit\":\"words\",\"max_words\":1500,\"overlap_words\":0,\"content_end\":\"next_heading\",\"page_furniture\":\"excluded\",\"anchoring_procedure\":\"anchoring/v1\",\"geometry_tool\":\"PyMuPDF 1.26.7\"}"
+  },
+  "document": {
+    "document_id": "huyen-ai-engineering",
+    "document_version": "0cd2fc8424e5220940663026edd7e3d4261ed67945d80008b352e7c5ded8fbb0",
+    "path": "data/Ingeniería de IA - Chip Huyen (EN).pdf"
+  },
+  "historical_m0_reference": {
+    "note": "se conserva intacta y no se compara por igualdad con la referencia D-17",
+    "procedure": "coincidencia textual M0 (Experimentos 2 y 3)",
+    "tail_blocks_with_caption": 30,
+    "tail_words_predecessor_same_page": 1777,
+    "tail_words_total": 14731
+  },
+  "method": {
+    "anchoring_procedure": "anchoring/v1",
+    "calibration": {
+      "delta_pt": 72.118,
+      "destinations_unusable": 0,
+      "dispersion_pt": 0.75,
+      "entries": 116,
+      "heading_min_ratio": 1.227,
+      "heading_min_size_pt": 18.403,
+      "outline_scale_anomalies": 17,
+      "outline_scale_factor": 1.148827,
+      "outline_scale_residual_max_pt": 0.751,
+      "procedure": "anchoring/v1",
+      "tolerance_pt": 2.0,
+      "top_band_pt": 200.0
+    },
+    "cut": "D-17: el fragmento arranca en la primera línea del bloque de encabezado",
+    "tail": "líneas por encima de ese corte en la página declarada de la unidad"
+  },
+  "metrics": {
+    "anchored_by_level": {
+      "pagina+tipografia": 33,
+      "posicional": 133
+    },
+    "corpus_units": 166,
+    "fragments": 583,
+    "page_number_anomalies": 0,
+    "page_number_lines_excluded": 692,
+    "table_blocks": 209,
+    "tail_blocks_with_caption": 30,
+    "tail_words_predecessor_same_page": 2004,
+    "tail_words_total": 15417
+  },
+  "reference": "cola medida con el corte de D-17 (primera línea del bloque de encabezado)",
+  "relationship_m0_d17": {
+    "m0_tail_words_measured_now": 14731,
+    "note": "M0 corta por coincidencia textual (Experimento 2); D-17 corta en la primera línea del bloque de encabezado. Las unidades con corte distinto explican la diferencia entre ambas referencias: es una diferencia de procedimiento, no un defecto del algoritmo.",
+    "units_with_different_cut": 12
+  }
+}
