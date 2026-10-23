@@ -86,7 +86,9 @@ def _cut_relacion(pdf: Path) -> dict[str, int | str]:
 
 def measure() -> dict[str, object]:
     """Corre la unidad 1 sobre el piloto y devuelve la referencia bajo D-17."""
-    result = ingest_in_memory(PILOT, DOCUMENT_ID)
+    result = ingest_in_memory(
+        PILOT, DOCUMENT_ID, text_extractor=PdftotextExtractor(PILOT), geometry=PyMuPdfGeometry(PILOT)
+    )
     counts = result.trace.counts
     return {
         "reference": "cola medida con el corte de D-17 (primera línea del bloque de encabezado)",

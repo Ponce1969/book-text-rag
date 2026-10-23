@@ -310,6 +310,9 @@ def test_fallo_de_extraccion_informa_codigo_y_detalles_sin_escaparse(
     def fallar(*args: object, **kwargs: object) -> None:
         raise IngestError(ErrorCode.EXTRACTION_FAILED, "fallo de prueba", origen="pdf")
 
+    # La CLI construye los adaptadores (raíz de composición): se doblan para aislar el reporte de error.
+    monkeypatch.setattr(cli, "PdftotextExtractor", lambda *_: object())
+    monkeypatch.setattr(cli, "PyMuPdfGeometry", lambda *_: object())
     monkeypatch.setattr(cli, "ingest_persistent", fallar)
     assert (
         main(

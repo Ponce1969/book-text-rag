@@ -54,24 +54,17 @@ def test_la_arquitectura_real_respeta_la_direccion() -> None:
     assert "arquitectura OK" in resultado.stdout
 
 
-def test_la_deuda_declarada_se_detectaria_sin_su_excepcion() -> None:
-    """La única excepción registrada es real: al quitarla, el guardián la denuncia."""
+def test_no_queda_deuda_declarada_en_el_guardian() -> None:
+    """La aplicación ya no importa adaptadores: el registro de excepciones está vacío."""
     sys.path.insert(0, str(RAIZ / "scripts"))
     try:
         import check_architecture
     finally:
         sys.path.pop(0)
-    original = dict(check_architecture.EXCEPCIONES)
-    check_architecture.EXCEPCIONES.clear()
-    try:
-        violaciones, _ = check_architecture.analizar(RAIZ / "src")
-    finally:
-        check_architecture.EXCEPCIONES.update(original)
 
-    # Dos imports del mismo subpaquete (geometría y extractor) caen bajo la excepción declarada.
-    assert {v.archivo for v in violaciones} == {"application/ingest_in_memory.py"}
-    assert {(v.capa, v.capa_destino) for v in violaciones} == {("application", "adapters")}
-    assert len(violaciones) == 2
+    assert check_architecture.EXCEPCIONES == {}
+    violaciones, _ = check_architecture.analizar(RAIZ / "src")
+    assert violaciones == []
 
 
 def test_un_import_prohibido_falla(tmp_path: Path) -> None:

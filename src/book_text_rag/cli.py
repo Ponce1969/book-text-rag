@@ -24,6 +24,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
+from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
+from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
 from book_text_rag.adapters.storage.sqlite import SqliteStore
 from book_text_rag.application.health import exigir_disponible, health
 from book_text_rag.application.index_version import index_version_de_resultados
@@ -455,13 +457,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "ingest":
             document_id = str(args.document_id)
             _exigir_almacen_inicializado(store, document_id)
+            # Raíz de composición: la CLI construye los adaptadores concretos y la aplicación recibe
+            # los puertos. Así la capa de aplicación no depende de ningún adaptador.
+            pdf = Path(str(args.pdf))
             resultado_ingesta, escritura = ingest_persistent(
-                Path(str(args.pdf)),
+                pdf,
                 document_id,
                 str(args.alias),
                 fecha=str(args.fecha),
                 store=store,
                 source_format=None if args.source_format is None else str(args.source_format),
+                text_extractor=PdftotextExtractor(pdf),
+                geometry=PyMuPdfGeometry(pdf),
             )
             print(_summarize(resultado_ingesta))
             print(f"almacen: {store.path}")

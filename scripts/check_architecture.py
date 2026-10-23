@@ -35,15 +35,9 @@ PERMITIDAS: dict[str, frozenset[str]] = {
     "cli": frozenset({"domain", "ports", "application", "adapters"}),
 }
 
-EXCEPCIONES: dict[tuple[str, str], str] = {
-    (
-        "application/ingest_in_memory.py",
-        "book_text_rag.adapters.extraction",
-    ): (
-        "composición por defecto de los puertos de extracción cuando el llamador no los inyecta. "
-        "Deuda declarada: debería resolverse en la raíz de composición (cli) sin cambiar la firma."
-    ),
-}
+EXCEPCIONES: dict[tuple[str, str], str] = {}
+"""Sin excepciones: la aplicación no importa adaptadores. Si aparece una violación, es un fallo."""
+
 """Deuda aceptada, con archivo y módulo **exactos**. Cualquier otra violación es un fallo."""
 
 

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
+from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
 from book_text_rag.adapters.storage.sqlite import SqliteStore
 from book_text_rag.application.ingest_in_memory import ingest_in_memory
 from book_text_rag.domain.models import IngestResult
@@ -29,7 +31,9 @@ pytestmark = pytest.mark.skipif(not PILOT.exists(), reason="falta el PDF piloto 
 @pytest.fixture(scope="module")
 def resultado_piloto() -> IngestResult:
     """Una extracción del módulo para fijar versión, corpus medido y término de consulta."""
-    return ingest_in_memory(PILOT, DOCUMENT_ID)
+    return ingest_in_memory(
+        PILOT, DOCUMENT_ID, text_extractor=PdftotextExtractor(PILOT), geometry=PyMuPdfGeometry(PILOT)
+    )
 
 
 def _huella(ruta: Path) -> str:

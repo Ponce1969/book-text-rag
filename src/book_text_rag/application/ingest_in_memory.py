@@ -74,7 +74,8 @@ def ingest_in_memory(
     """Produce los fragmentos y la traza de la unidad 1 para una fuente y una configuración.
 
     `document_id` es un parámetro explícito: el catálogo de fuentes de D-13 es persistencia y queda
-    fuera de esta unidad.
+    fuera de esta unidad. El **extractor y la geometría son obligatorios**: la aplicación no construye
+    adaptadores concretos, los inyecta la raíz de composición (`cli`).
     """
     if not document_id.strip():
         raise IngestError(ErrorCode.CONFIG_INVALID, "document_id vacío")
@@ -86,11 +87,18 @@ def ingest_in_memory(
     except OSError as error:
         raise IngestError(ErrorCode.SOURCE_UNREADABLE, "la fuente no puede leerse", ruta=str(pdf_path)) from error
 
-    from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
-    from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
+    # Los adaptadores concretos **no** se construyen aquí: la aplicación depende de los puertos y la
+    # raíz de composición (la CLI) inyecta las implementaciones. Construirlos aquí invertiría la
+    # dirección de la arquitectura hexagonal; omitirlos es un error de configuración, no un valor por
+    # defecto.
+    if text_extractor is None or geometry is None:
+        raise IngestError(
+            ErrorCode.CONFIG_INVALID,
+            "el extractor de texto y la geometría deben inyectarse desde la raíz de composición",
+        )
 
-    extractor: TextExtractor = text_extractor if text_extractor is not None else PdftotextExtractor(pdf_path)
-    geometry_provider: GeometryProvider = geometry if geometry is not None else PyMuPdfGeometry(pdf_path)
+    extractor: TextExtractor = text_extractor
+    geometry_provider: GeometryProvider = geometry
 
     active_manifest = manifest if manifest is not None else default_manifest(geometry_provider.tool())
     from book_text_rag.domain.manifest import validate_manifest

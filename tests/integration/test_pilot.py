@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
+from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
 from book_text_rag.application.ingest_in_memory import ingest_in_memory
 from book_text_rag.domain.identity import content_hash
 from book_text_rag.domain.models import BlockType, IngestResult
@@ -50,7 +52,9 @@ pytestmark = pytest.mark.skipif(not PILOT.exists(), reason="falta el PDF piloto 
 
 @pytest.fixture(scope="module")
 def pilot() -> IngestResult:
-    return ingest_in_memory(PILOT, DOCUMENT_ID)
+    return ingest_in_memory(
+        PILOT, DOCUMENT_ID, text_extractor=PdftotextExtractor(PILOT), geometry=PyMuPdfGeometry(PILOT)
+    )
 
 
 def test_document_version_del_piloto(pilot: IngestResult) -> None:

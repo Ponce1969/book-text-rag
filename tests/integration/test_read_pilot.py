@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
+from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
 from book_text_rag.adapters.storage import sqlite_write as sqlite_write_module
 from book_text_rag.adapters.storage.sqlite import SqliteStore
 from book_text_rag.application.ingest_in_memory import ingest_in_memory
@@ -38,7 +40,9 @@ pytestmark = pytest.mark.skipif(not PILOT.exists(), reason="falta el PDF piloto 
 
 @pytest.fixture(scope="module")
 def unidad() -> UnitWrite:
-    resultado = ingest_in_memory(PILOT, DOCUMENT_ID)
+    resultado = ingest_in_memory(
+        PILOT, DOCUMENT_ID, text_extractor=PdftotextExtractor(PILOT), geometry=PyMuPdfGeometry(PILOT)
+    )
     return UnitWrite(
         document_id=DOCUMENT_ID,
         alias=ALIAS,
