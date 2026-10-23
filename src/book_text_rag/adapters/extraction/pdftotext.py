@@ -20,22 +20,65 @@ _VERSION_RE = re.compile(r"version\s+(\S+)", re.IGNORECASE)
 
 
 def decode_output(blob: bytes) -> str:
-    """Decodifica la salida del extractor en UTF-8 **estricto** (D-19 §1.2).
+    """Decodifica la salida del extractor en UTF-8 **estricto**, con una excepción declarada.
 
     Sin `errors="replace"`, sin BOM y sin normalización posterior: los errores se manifiestan en vez
     de ocultarse (D-20 §5, `decode_error`).
+
+    **Excepción aprobada (D-19 §1.2, enmienda 2026-10-23).** Algunos PDF traen caracteres astrales
+    codificados en **CESU-8**: dos surrogates UTF-8 consecutivos (p. ej. `ED A0 BE ED B7 A0` para
+    U+1F9E0) en lugar de la secuencia UTF-8 de cuatro bytes. Esos pares **se recomponen** en el carácter
+    real, que es lo que el autor escribió; no se sustituye nada. Un surrogate **no emparejado** o cualquier
+    otra secuencia irreparable sigue siendo `decode_error`: la política no se vuelve permisiva.
     """
     try:
-        text = blob.decode("utf-8", errors="strict")
+        text = blob.decode("utf-8", errors="surrogatepass")
     except UnicodeDecodeError as error:
         raise IngestError(
             ErrorCode.DECODE_ERROR,
             "la salida del extractor no decodifica en UTF-8 estricto",
             posicion=error.start,
         ) from error
+    text = _recomponer_pares_cesu8(text)
     if text.startswith("\ufeff"):
         raise IngestError(ErrorCode.DECODE_ERROR, "la salida del extractor trae BOM")
     return text
+
+
+def _recomponer_pares_cesu8(texto: str) -> str:
+    """Combina pares de surrogates (CESU-8) en su carácter astral; rechaza los no emparejados.
+
+    `surrogatepass` deja los surrogates tal cual. Aquí se valida que **cada** uno forme parte de un par
+    alto+bajo y se recompone con la fórmula UTF-16; cualquier surrogate suelto es un error explícito, no
+    un reemplazo.
+    """
+    if not any("\ud800" <= caracter <= "\udfff" for caracter in texto):
+        return texto
+    resultado: list[str] = []
+    indice = 0
+    while indice < len(texto):
+        caracter = texto[indice]
+        if "\ud800" <= caracter <= "\udbff":
+            siguiente = texto[indice + 1] if indice + 1 < len(texto) else ""
+            if not "\udc00" <= siguiente <= "\udfff":
+                raise IngestError(
+                    ErrorCode.DECODE_ERROR,
+                    "la salida trae un surrogate alto no emparejado",
+                    posicion=indice,
+                )
+            codigo = 0x10000 + ((ord(caracter) - 0xD800) << 10) + (ord(siguiente) - 0xDC00)
+            resultado.append(chr(codigo))
+            indice += 2
+            continue
+        if "\udc00" <= caracter <= "\udfff":
+            raise IngestError(
+                ErrorCode.DECODE_ERROR,
+                "la salida trae un surrogate bajo no emparejado",
+                posicion=indice,
+            )
+        resultado.append(caracter)
+        indice += 1
+    return "".join(resultado)
 
 
 class PdftotextExtractor:
