@@ -1,0 +1,28 @@
+# Source books: copyrighted and/or large — never commit
+data/**/*.pdf
+data/**/*.epub
+data/**/*.mobi
+data/**/*.azw3
+data/**/*.djvu
+
+# Derived artifacts (extracted text, chunks, embeddings, indexes)
+data/extracted/
+data/derived/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# NOTE: uv.lock is versioned on purpose (see AGENTS.md).

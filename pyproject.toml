@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "book-text-rag"
+version = "0.0.1"
+description = "Recuperación de evidencia textual con procedencia verificable (prototipo en memoria)"
+requires-python = ">=3.13"
+dependencies = [
+  "pydantic>=2.12",
+  "pymupdf==1.26.7",
+]
+
+[project.scripts]
+book-text-rag = "book_text_rag.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=9",
+  "ruff>=0.14",
+  "mypy>=2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/book_text_rag"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+disallow_any_explicit = false
+
+[[tool.mypy.overrides]]
+module = ["fitz", "fitz.*"]
+ignore_missing_imports = true
