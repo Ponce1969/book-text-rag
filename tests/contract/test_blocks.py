@@ -30,10 +30,19 @@ from tests.conftest import (
 )
 
 
-def _run(tmp_path: Path, text: FakeTextExtractor, geometry: FakeGeometry) -> IngestResult:
+def _run(
+    tmp_path: Path, text: FakeTextExtractor, geometry: FakeGeometry, *, end_page: int | None = None
+) -> IngestResult:
     pdf = tmp_path / "sintetico.pdf"
     pdf.write_bytes(b"bytes sinteticos")
-    return ingest_in_memory(pdf, "sintetico", text_extractor=text, geometry=geometry)
+    return ingest_in_memory(
+        pdf,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=end_page if end_page is not None else len(text.pages()) + 1,
+    )
 
 
 def _filled_document(last_page: int = 50) -> tuple[FakeTextExtractor, FakeGeometry]:
@@ -74,7 +83,8 @@ def test_regiones_excluidas(tmp_path: Path) -> None:
     text, geometry = _filled_document(last_page=730)
     text.pages_list[19] = "MATERIAL DE PORTADA"
     text.pages_list[729] = "MATERIAL DE CIERRE"
-    result = _run(tmp_path, text, geometry)
+    # Frontera explícita 25..716, la del piloto: el material de la página 730 queda fuera del corpus.
+    result = _run(tmp_path, text, geometry, end_page=717)
     for fragment in result.fragments:
         assert "MATERIAL DE PORTADA" not in fragment.content
         assert "MATERIAL DE CIERRE" not in fragment.content
@@ -231,6 +241,8 @@ def test_parte_no_coincidente_falla_antes_de_t1_y_no_persiste(tmp_path: Path) ->
             store=SqliteStore(ruta),
             text_extractor=text,
             geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=len(text.pages()) + 1,
         )
 
     assert info.value.code is ErrorCode.UNIT_NOT_ANCHORED
@@ -346,6 +358,8 @@ def test_fallback_persistido_verifica_y_registra_la_evidencia(tmp_path: Path) ->
         store=store,
         text_extractor=text,
         geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
     )
     desplazado = next(f for f in resultado.fragments if f.section_path[-1] == "I. Shifted")
     assert store.verify_version("sintetico", resultado.trace.document_version).ok is True
@@ -410,6 +424,8 @@ def test_fallback_ambiguo_falla_sin_persistir(tmp_path: Path) -> None:
             store=SqliteStore(ruta),
             text_extractor=text,
             geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=len(text.pages()) + 1,
         )
 
     assert info.value.code is ErrorCode.UNIT_NOT_ANCHORED
@@ -649,6 +665,8 @@ def test_ventana_local_persistida_verifica_y_registra_evidencia(tmp_path: Path) 
         store=store,
         text_extractor=text,
         geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
     )
     ventana = next(f for f in resultado.fragments if f.section_path[-1] == "Agents as Tools: A Powerful Pattern")
     assert store.verify_version("sintetico", resultado.trace.document_version).ok is True
@@ -681,6 +699,8 @@ def test_ventana_local_ambigua_falla_sin_persistir(tmp_path: Path) -> None:
             store=SqliteStore(ruta),
             text_extractor=text,
             geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=len(text.pages()) + 1,
         )
 
     assert info.value.code is ErrorCode.UNIT_NOT_ANCHORED

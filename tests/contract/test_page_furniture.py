@@ -45,7 +45,14 @@ def test_la_anomalia_aparece_en_la_traza_y_el_texto_se_conserva(tmp_path: Path) 
 
     pdf = tmp_path / "sintetico.pdf"
     pdf.write_bytes(b"bytes sinteticos")
-    result = ingest_in_memory(pdf, "sintetico", text_extractor=text, geometry=geometry)
+    result = ingest_in_memory(
+        pdf,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
+    )
 
     assert result.trace.counts.page_number_anomalies == 1
     assert result.trace.counts.page_number_lines_excluded == 20
@@ -59,7 +66,14 @@ def test_todas_las_exclusiones_del_corpus_se_cuentan(tmp_path: Path) -> None:
     text, geometry = builder.build(50)
     pdf = tmp_path / "sintetico.pdf"
     pdf.write_bytes(b"bytes sinteticos")
-    result = ingest_in_memory(pdf, "sintetico", text_extractor=text, geometry=geometry)
+    result = ingest_in_memory(
+        pdf,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
+    )
     assert result.trace.counts.page_number_lines_excluded == 22
     assert result.trace.counts.page_number_anomalies == 0
     for fragment in result.fragments:

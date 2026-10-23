@@ -313,6 +313,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     ingest.add_argument("--fecha", required=True, help="fecha explícita de la referencia")
     ingest.add_argument("--store", required=True, help="ruta explícita del almacén SQLite")
     ingest.add_argument("--source-format", help="formato declarado de la fuente")
+    ingest.add_argument(
+        "--corpus-start-page",
+        type=int,
+        help=(
+            "primera página del cuerpo; por defecto se deriva del outline (primer apartado de nivel 1 con numeración)"
+        ),
+    )
+    ingest.add_argument(
+        "--corpus-end-page",
+        type=int,
+        help="primera página fuera del cuerpo; por defecto se deriva del apartado Index del outline",
+    )
 
     verificar = subparsers.add_parser(
         "verify",
@@ -469,6 +481,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_format=None if args.source_format is None else str(args.source_format),
                 text_extractor=PdftotextExtractor(pdf),
                 geometry=PyMuPdfGeometry(pdf),
+                corpus_start_page=args.corpus_start_page,
+                corpus_end_page=args.corpus_end_page,
             )
             print(_summarize(resultado_ingesta))
             print(f"almacen: {store.path}")

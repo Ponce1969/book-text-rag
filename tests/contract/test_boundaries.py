@@ -13,7 +13,14 @@ from tests.conftest import BODY_SIZE, HEADING_SIZE, DocumentBuilder, FakeGeometr
 def _run(tmp_path: Path, text: FakeTextExtractor, geometry: FakeGeometry) -> IngestResult:
     pdf = tmp_path / "sintetico.pdf"
     pdf.write_bytes(b"bytes sinteticos")
-    return ingest_in_memory(pdf, "sintetico", text_extractor=text, geometry=geometry)
+    return ingest_in_memory(
+        pdf,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
+    )
 
 
 def test_cola_del_predecesor(tmp_path: Path, unit_with_tail: tuple[FakeTextExtractor, FakeGeometry]) -> None:
@@ -60,7 +67,7 @@ def test_predecesor_en_la_misma_pagina(tmp_path: Path) -> None:
     text.pages_list[45] = "\n".join([*page_lines[:-1], "Child", "child body", "", number])
 
     result = _run(tmp_path, text, geometry)
-    units = build_units(geometry.toc())
+    units = build_units(geometry.toc(), start_page=25)
     assert len(units) == 23
     parent = next(unit for unit in units if unit.title == "Parent")
     assert parent.kind.value == "parent_own"

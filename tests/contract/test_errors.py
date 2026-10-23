@@ -38,7 +38,9 @@ def test_extractor_unavailable(tmp_path: Path) -> None:
     extractor = PdftotextExtractor(pdf, binary=Path("binario-inexistente"))
     _text, geometry = _document()
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(pdf, "doc", text_extractor=extractor, geometry=geometry)
+        ingest_in_memory(
+            pdf, "doc", text_extractor=extractor, geometry=geometry, corpus_start_page=25, corpus_end_page=99
+        )
     assert error.value.code is ErrorCode.EXTRACTOR_UNAVAILABLE
 
 
@@ -65,7 +67,14 @@ def test_outline_unavailable(tmp_path: Path) -> None:
     text, _ = _document()
     geometry = FakeGeometry(toc_entries=[], page_lines={})
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry)
+        ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert error.value.code is ErrorCode.OUTLINE_UNAVAILABLE
 
 
@@ -75,7 +84,14 @@ def test_calibration_failed_por_pocas_entradas(tmp_path: Path) -> None:
     builder.add_unit(26, "Beta", [["beta body"]])
     text, geometry = builder.build(30)
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry)
+        ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert error.value.code is ErrorCode.CALIBRATION_FAILED
     assert error.value.details["minimo"] == 20
 
@@ -86,7 +102,14 @@ def test_calibration_failed_por_dispersion(tmp_path: Path) -> None:
         if entry.page >= 25 and index % 2 == 0:
             geometry.toc_entries[index] = entry.model_copy(update={"y_dest": (entry.y_dest or 0.0) + 8.0})
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry)
+        ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert error.value.code is ErrorCode.CALIBRATION_FAILED
     assert {"dispersion_pt", "nucleo", "entradas"} & set(error.value.details)
 
@@ -98,7 +121,14 @@ def test_unit_not_anchored(tmp_path: Path) -> None:
         line.model_copy(update={"bold": False, "size": 12.0}) if line.bold else line for line in lines
     ]
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry)
+        ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert error.value.code is ErrorCode.UNIT_NOT_ANCHORED
     assert error.value.details["titulo"] == "Filler 46"
 
@@ -107,7 +137,15 @@ def test_config_invalid(tmp_path: Path) -> None:
     text, geometry = _document()
     manifest = default_manifest(geometry.tool()).model_copy(update={"max_words": 0})
     with pytest.raises(IngestError) as error:
-        ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry, manifest=manifest)
+        ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            manifest=manifest,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert error.value.code is ErrorCode.CONFIG_INVALID
 
 
@@ -126,8 +164,22 @@ def test_sin_resultados_parciales(tmp_path: Path) -> None:
     ]
     resultado = None
     with pytest.raises(IngestError):
-        resultado = ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text, geometry=geometry)
+        resultado = ingest_in_memory(
+            _dummy_pdf(tmp_path),
+            "doc",
+            text_extractor=text,
+            geometry=geometry,
+            corpus_start_page=25,
+            corpus_end_page=99,
+        )
     assert resultado is None
 
     text_ok, geometry_ok = _document()
-    assert ingest_in_memory(_dummy_pdf(tmp_path), "doc", text_extractor=text_ok, geometry=geometry_ok).fragments
+    assert ingest_in_memory(
+        _dummy_pdf(tmp_path),
+        "doc",
+        text_extractor=text_ok,
+        geometry=geometry_ok,
+        corpus_start_page=25,
+        corpus_end_page=99,
+    ).fragments

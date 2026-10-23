@@ -14,6 +14,7 @@ from book_text_rag.domain.anchor import align_heading_index, anchor, calibrate
 from book_text_rag.domain.fragmentation import (
     AnchoredUnit,
     FragmentDraft,
+    body_start,
     build_units,
     corpus_end_marker,
     counts_of,
@@ -24,7 +25,6 @@ from book_text_rag.domain.fragmentation import (
 )
 from book_text_rag.domain.identity import chunk_id, content_hash, document_version, document_version_short
 from book_text_rag.domain.manifest import (
-    CORPUS_END,
     Manifest,
     canonical_manifest,
     chunking_config_version,
@@ -52,8 +52,14 @@ from book_text_rag.ports.extraction import GeometryProvider, TextExtractor
 USABLE_Y = 0.5
 
 
-def _clean_pages(pages: list[str], furniture: HeaderFurniture) -> tuple[list[list[str]], int, list[int]]:
-    """Excluye el mobiliario de página y registra exclusiones y **páginas** con anomalía (`D-23`)."""
+def _clean_pages(
+    pages: list[str], furniture: HeaderFurniture, *, start_page: int, end_page: int
+) -> tuple[list[list[str]], int, list[int]]:
+    """Excluye el mobiliario de página y registra exclusiones y **páginas** con anomalía (`D-23`).
+
+    El recuento se limita al **corpus del libro** (`D-18` §3.4: la regla de mobiliario se aplica al
+    contenido del corpus), no a un rango fijo de páginas.
+    """
     cleaned: list[list[str]] = []
     excluded = 0
     anomalas: list[int] = []
@@ -61,7 +67,7 @@ def _clean_pages(pages: list[str], furniture: HeaderFurniture) -> tuple[list[lis
         result = strip_page_number(page_text.split("\n"), number)
         header = strip_header_line(result.lines, number, furniture)
         cleaned.append(header.lines)
-        if 25 <= number <= 716:
+        if start_page <= number <= end_page:
             if result.excluded or header.excluded:
                 excluded += 1
             if result.anomaly or header.anomaly:
@@ -77,6 +83,8 @@ def ingest_in_memory(
     geometry: GeometryProvider | None = None,
     manifest: Manifest | None = None,
     temporal_mark: str | None = None,
+    corpus_start_page: int | None = None,
+    corpus_end_page: int | None = None,
 ) -> IngestResult:
     """Produce los fragmentos y la traza de la unidad 1 para una fuente y una configuración.
 
@@ -117,12 +125,31 @@ def ingest_in_memory(
         raise IngestError(ErrorCode.EXTRACTION_FAILED, "el extractor no devolvió páginas")
     geometry_pages = {page: geometry_provider.lines(page) for page in range(1, len(pages) + 1)}
     furniture = detect_header_furniture(geometry_pages)
-    clean_pages, excluded_lines, anomalas = _clean_pages(pages, furniture)
 
     toc = geometry_provider.toc()
     if not toc:
         raise IngestError(ErrorCode.OUTLINE_UNAVAILABLE, "el documento no tiene marcadores utilizables")
-    units = build_units(toc)
+
+    # Fronteras del corpus derivadas del outline del libro (D-10 pto. iv): el cuerpo empieza en su
+    # primer apartado numerado y termina antes del Index. Los límites explícitos existen para libros
+    # cuya estructura no se reconoce, y sustituyen a la derivación en lugar de completarla.
+    start_page = corpus_start_page if corpus_start_page is not None else body_start(toc).page
+    if corpus_end_page is not None:
+        end_marker = (corpus_end_page, 0)
+    else:
+        end_marker = corpus_end_marker(toc, [page.split(chr(10)) for page in pages])
+    if start_page < 1 or end_marker[0] <= start_page:
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "las fronteras del corpus no delimitan un cuerpo válido",
+            inicio=start_page,
+            fin=end_marker[0],
+        )
+
+    clean_pages, excluded_lines, anomalas = _clean_pages(
+        pages, furniture, start_page=start_page, end_page=end_marker[0] - 1
+    )
+    units = build_units(toc, start_page=start_page)
     if not units:
         raise IngestError(ErrorCode.OUTLINE_UNAVAILABLE, "el corpus no tiene unidades")
 
@@ -148,9 +175,9 @@ def ingest_in_memory(
         next_lines: Sequence[Line] | None = None
         candidate_page = unit.page + 1
         if (
-            candidate_page <= CORPUS_END
+            candidate_page < end_marker[0]
             and candidate_page <= len(clean_pages)
-            and candidate_page < successor_page(toc, unit)
+            and candidate_page < successor_page(toc, unit, end_page=end_marker[0])
         ):
             next_page = candidate_page
             next_lines = geometry_provider.lines(candidate_page)
@@ -178,7 +205,7 @@ def ingest_in_memory(
         previous_page = real_page
         previous_y0 = evidence.y0
 
-    spans = unit_spans(toc, anchored, clean_pages, corpus_end_marker(toc, clean_pages))
+    spans = unit_spans(toc, anchored, clean_pages, end_marker)
     version = document_version(pdf_bytes)
     short = document_version_short(version)
 

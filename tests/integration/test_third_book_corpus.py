@@ -30,24 +30,32 @@ def tercer_libro() -> IngestResult:
 
 
 def test_recuento_de_unidades_del_corpus(tercer_libro: IngestResult) -> None:
-    assert tercer_libro.trace.counts.corpus_units == 741
+    assert tercer_libro.trace.counts.corpus_units == 728
 
 
 def test_recuento_de_fragmentos(tercer_libro: IngestResult) -> None:
-    assert len(tercer_libro.fragments) == 743
+    assert len(tercer_libro.fragments) == 730
 
 
 def test_lineas_de_numeros_de_pagina_excluidas(tercer_libro: IngestResult) -> None:
-    assert tercer_libro.trace.counts.page_number_lines_excluded == 504
+    assert tercer_libro.trace.counts.page_number_lines_excluded == 494
 
 
-def test_pagina_anomala(tercer_libro: IngestResult) -> None:
-    assert tercer_libro.trace.counts.paginas_anomalas == [565]
+def test_sin_paginas_anomalas(tercer_libro: IngestResult) -> None:
+    assert tercer_libro.trace.counts.paginas_anomalas == []
+
+
+def test_front_matter_queda_fuera_del_corpus(tercer_libro: IngestResult) -> None:
+    """El cuerpo abre en el primer apartado numerado (`1`, pág. 40): el front matter no entra."""
+    fragments = tercer_libro.fragments
+    assert min(fragment.pdf_page_start for fragment in fragments) == 40
+    assert fragments[0].section_path == ["1"]
+    assert fragments[0].pdf_page_start == 40
 
 
 def test_rango_de_paginas_y_exclusion_del_indice(tercer_libro: IngestResult) -> None:
     fragments = tercer_libro.fragments
-    assert min(fragment.pdf_page_start for fragment in fragments) == 30
+    assert min(fragment.pdf_page_start for fragment in fragments) == 40
     assert max(fragment.pdf_page_end for fragment in fragments) == 563
     assert all(fragment.pdf_page_end < 564 for fragment in fragments)
 

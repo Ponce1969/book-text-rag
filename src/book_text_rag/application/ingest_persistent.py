@@ -46,14 +46,22 @@ def ingest_persistent(
     text_extractor: TextExtractor | None = None,
     geometry: GeometryProvider | None = None,
     manifest: Manifest | None = None,
+    corpus_start_page: int | None = None,
+    corpus_end_page: int | None = None,
 ) -> tuple[IngestResult, WriteOutcome]:
-    """Produce la unidad en memoria y la persiste con la secuencia T1/T2/T3 de `D-25`."""
+    """Produce la unidad en memoria y la persiste con la secuencia T1/T2/T3 de `D-25`.
+
+    `corpus_start_page` y `corpus_end_page` son los límites explícitos para libros cuya estructura no
+    permite derivar las fronteras; sin ellos, las deriva el outline.
+    """
     resultado = ingest_in_memory(
         pdf_path,
         document_id,
         text_extractor=text_extractor,
         geometry=geometry,
         manifest=manifest,
+        corpus_start_page=corpus_start_page,
+        corpus_end_page=corpus_end_page,
     )
     unit = UnitWrite(
         document_id=document_id,

@@ -119,6 +119,11 @@ def _declared_part(text: str) -> tuple[int | None, str]:
     return (parts[0] if parts else None), value
 
 
+def roman_value(numeral: str) -> int | None:
+    """Valor de un numeral romano canónico; `None` si la forma no es canónica."""
+    return _roman_value(numeral)
+
+
 def core_title(title: str) -> str:
     """Título sin su forma ordinal, para comparar `N.` con `Chapter N.` (D-17 §2.3)."""
     value = norm(title)

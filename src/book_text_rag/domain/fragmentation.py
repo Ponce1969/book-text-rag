@@ -14,8 +14,8 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from book_text_rag.domain.anchor import norm, section_key
-from book_text_rag.domain.manifest import CORPUS_END, CORPUS_START, Manifest
+from book_text_rag.domain.anchor import norm, roman_value, section_key
+from book_text_rag.domain.manifest import Manifest
 from book_text_rag.domain.models import (
     BlockType,
     Counts,
@@ -29,6 +29,66 @@ from book_text_rag.domain.models import (
 CAPTION_RE = re.compile(r"^(?:Figure|Table)\s+\d+-\d+\.", re.MULTILINE)
 EXCLUDED_SECTION_KEY: tuple[int | None, str] = (None, "index")
 """Clave canónica del apartado que D-10 pto. (iv) excluye: el Index del libro."""
+
+_BODY_ARABIC = re.compile(r"^(?P<n>\d{1,2})[.:]?(?:\s|$)")
+_BODY_ROMAN = re.compile(r"^(?P<n>[IVXLCDM]{1,7})[.:]\s+")
+"""Marcas de numeración admitidas al inicio de un apartado de nivel 1.
+
+Son las tres convenciones observadas en los libros medidos: `1. Título` (piloto), `I. Título`
+(GraphRAG) y `1` solo (tercer libro). `Part 1` **no** cuenta: es un rótulo de parte, no la numeración
+del cuerpo, y admitirlo adelantaría la frontera a la portadilla de la parte."""
+
+
+def _body_ordinal(title: str) -> int | None:
+    """Valor del número con el que el apartado declara empezar el cuerpo, si lo declara."""
+    texto = norm(title)
+    arabic = _BODY_ARABIC.match(texto)
+    if arabic is not None:
+        return int(arabic.group("n"))
+    roman = _BODY_ROMAN.match(texto)
+    if roman is not None:
+        return roman_value(roman.group("n"))
+    return None
+
+
+def body_start(toc: Sequence[TocEntry]) -> TocEntry:
+    """Primer apartado de nivel 1 que abre el cuerpo por su numeración (`D-05` pto. 1, `D-10` iv).
+
+    El cuerpo empieza donde empieza la **numeración de los apartados**, no en una página fija: así el
+    front matter queda fuera sin constantes por libro. Falla de forma explícita cuando no hay ningún
+    candidato, cuando el primero no es el número 1 o cuando dos candidatos distintos comparten página:
+    en esos casos no hay evidencia suficiente para fijar la frontera.
+    """
+    candidates: list[tuple[TocEntry, int]] = []
+    for entry in toc:
+        if entry.level != 1:
+            continue
+        ordinal = _body_ordinal(entry.title)
+        if ordinal is not None:
+            candidates.append((entry, ordinal))
+    if not candidates:
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "el outline no declara ningún apartado de nivel 1 con numeración de cuerpo",
+        )
+    first, ordinal = candidates[0]
+    if ordinal != 1:
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "el primer apartado numerado de nivel 1 no empieza en 1: la frontera no es determinable",
+            apartado=first.title,
+            pagina=first.page,
+            numero=ordinal,
+        )
+    same_page = {(entry.title, value) for entry, value in candidates if entry.page == first.page}
+    if len(same_page) > 1:
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "dos apartados numerados de nivel 1 compiten por la misma página de inicio",
+            pagina=first.page,
+            apartados=sorted(title for title, _ in same_page),
+        )
+    return first
 
 
 class UnitSpan(BaseModel):
@@ -109,16 +169,20 @@ def excluded_section(toc: Sequence[TocEntry]) -> TocEntry | None:
     return None
 
 
-def corpus_end_marker(toc: Sequence[TocEntry], lines_per_page: Sequence[Sequence[str]]) -> tuple[int, int] | None:
+def corpus_end_marker(toc: Sequence[TocEntry], lines_per_page: Sequence[Sequence[str]]) -> tuple[int, int]:
     """Límite del corpus: página e índice de línea donde **empieza** el apartado excluido.
 
     El encabezado se localiza en la página que declara el outline por **igualdad canónica exacta**. Si
-    no aparece, la corrida falla de forma explícita: cortar en otro punto cambiaría el corpus en
-    silencio (`D-17`/`RP-02`).
+    el outline no declara el apartado, o el encabezado no aparece en su página, la corrida falla de
+    forma explícita: no hay constante que suplirlo ni corte alternativo que no cambie el corpus en
+    silencio (`D-17`/`RP-02`). Un libro sin esa estructura exige límites explícitos.
     """
     entry = excluded_section(toc)
     if entry is None:
-        return None
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "el outline no declara el apartado Index que cierra el cuerpo",
+        )
     if entry.page < 1 or entry.page > len(lines_per_page):
         raise IngestError(
             ErrorCode.OUTLINE_UNAVAILABLE,
@@ -137,11 +201,12 @@ def corpus_end_marker(toc: Sequence[TocEntry], lines_per_page: Sequence[Sequence
     )
 
 
-def build_units(toc: Sequence[TocEntry]) -> list[OutlineUnit]:
-    """Unidades del corpus a partir del outline (D-05 pto. 1; corpus = páginas 25-716 de D-01).
+def build_units(toc: Sequence[TocEntry], *, start_page: int) -> list[OutlineUnit]:
+    """Unidades del corpus a partir del outline (`D-05` pto. 1 y 4; `D-10` pto. iv).
 
-    La hoja más profunda disponible es la unidad; una entrada con hijos aporta su texto propio como
-    fragmento propio (`parent_own`, D-05 pto. 4).
+    El corpus empieza en `start_page` —la frontera que declara `body_start`, no una constante del
+    piloto— y termina en el apartado excluido (`Index`). La hoja más profunda disponible es la unidad;
+    una entrada con hijos aporta su texto propio como fragmento propio (`parent_own`).
     """
     units: list[OutlineUnit] = []
     stack: list[TocEntry] = []
@@ -155,7 +220,7 @@ def build_units(toc: Sequence[TocEntry]) -> list[OutlineUnit]:
             truncado = True
         if truncado:
             continue
-        if entry.page < CORPUS_START or entry.page > CORPUS_END:
+        if entry.page < start_page:
             continue
         has_child = index + 1 < len(toc) and toc[index + 1].level > entry.level
         units.append(
@@ -172,15 +237,18 @@ def build_units(toc: Sequence[TocEntry]) -> list[OutlineUnit]:
     return units
 
 
-def successor_page(toc: Sequence[TocEntry], unit: OutlineUnit) -> int:
-    """Página de la sucesora en el outline (D-18 §2.1): la próxima entrada del libro tras la unidad."""
+def successor_page(toc: Sequence[TocEntry], unit: OutlineUnit, *, end_page: int) -> int:
+    """Página de la sucesora en el outline (D-18 §2.1): la próxima entrada del libro tras la unidad.
+
+    Sin sucesora, el fin del corpus (`end_page`) es la respuesta: no hay constante por libro.
+    """
     for index, entry in enumerate(toc):
         if entry.page == unit.page and entry.title == unit.title:
             nexts = [item for item in toc[index + 1 :] if item.page >= entry.page]
             if nexts:
                 return nexts[0].page
-            return CORPUS_END
-    return CORPUS_END
+            return end_page
+    return end_page
 
 
 def unit_spans(
@@ -189,11 +257,12 @@ def unit_spans(
     lines_per_page: Sequence[Sequence[str]],
     corpus_end: tuple[int, int] | None = None,
 ) -> list[UnitSpan]:
-    """Tramos de contenido por unidad, acotados al corpus (nunca más allá de la página 716).
+    """Tramos de contenido por unidad, acotados al corpus: nunca más allá de su fin declarado.
 
     `corpus_end` es el marcador de inicio del apartado excluido (`corpus_end_marker`): el último
     tramo se recorta ahí para que el material excluido no quede absorbido por la unidad anterior.
     """
+    limit_page = corpus_end[0] if corpus_end is not None else len(lines_per_page)
     spans: list[UnitSpan] = []
     for position, item in enumerate(anchored):
         unit = item.unit
@@ -202,10 +271,12 @@ def unit_spans(
             end_page = following.page
             end_index = following.text_index
         else:
-            end_page = min(successor_page(toc, unit), CORPUS_END)
+            end_page = min(successor_page(toc, unit, end_page=limit_page), limit_page)
             end_index = len(lines_per_page[end_page - 1]) if end_page <= len(lines_per_page) else 0
-        if end_page > CORPUS_END or end_page > len(lines_per_page):
-            end_page = min(CORPUS_END, len(lines_per_page))
+        if end_page > limit_page or end_page > len(lines_per_page):
+            end_page = min(limit_page, len(lines_per_page))
+            if end_page < 1:
+                raise AssertionError("el tramo queda fuera del documento")
             end_index = len(lines_per_page[end_page - 1])
         if corpus_end is not None and (end_page, end_index) > corpus_end:
             end_page, end_index = corpus_end

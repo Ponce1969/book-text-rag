@@ -18,8 +18,9 @@ from book_text_rag.domain.models import ErrorCode, IngestError
 
 MANIFEST_SCHEMA = "chunking_config/v3"
 ANCHORING_PROCEDURE = "anchoring/v1"
-CORPUS_START = 25
-CORPUS_END = 716
+"""Las fronteras del corpus **no** se fijan aquí: se derivan del outline de cada libro (`body_start`
+para el inicio y el apartado `Index` para el fin, `D-10` pto. iv). Las antiguas constantes del piloto
+(`25` y `716`, de `D-01`) dejaron de usarse como límites universales."""
 
 _STR_VALUE_FIELDS = (
     "segmentation_unit",

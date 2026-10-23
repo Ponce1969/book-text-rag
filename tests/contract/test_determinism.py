@@ -21,6 +21,8 @@ def _run(tmp_path: Path, text: FakeTextExtractor, geometry: FakeGeometry, mark: 
         geometry=geometry,
         manifest=manifest,
         temporal_mark=mark,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
     )
 
 

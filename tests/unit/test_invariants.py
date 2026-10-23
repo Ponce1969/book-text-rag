@@ -24,7 +24,15 @@ def _run(
     max_words: int = 1500,
 ) -> IngestResult:
     manifest = default_manifest(geometry.tool()).model_copy(update={"max_words": max_words})
-    return ingest_in_memory(pdf_path, "sintetico", text_extractor=text, geometry=geometry, manifest=manifest)
+    return ingest_in_memory(
+        pdf_path,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        manifest=manifest,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
+    )
 
 
 def _source_words(text: FakeTextExtractor, first_page: int, last_page: int) -> list[str]:

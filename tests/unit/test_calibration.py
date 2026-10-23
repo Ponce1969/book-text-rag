@@ -29,7 +29,14 @@ def _document(units: int = 30) -> tuple[FakeTextExtractor, FakeGeometry, list[in
 def _run(tmp_path: Path, text: FakeTextExtractor, geometry: FakeGeometry) -> IngestResult:
     pdf = tmp_path / "sintetico.pdf"
     pdf.write_bytes(b"bytes sinteticos")
-    return ingest_in_memory(pdf, "sintetico", text_extractor=text, geometry=geometry)
+    return ingest_in_memory(
+        pdf,
+        "sintetico",
+        text_extractor=text,
+        geometry=geometry,
+        corpus_start_page=25,
+        corpus_end_page=len(text.pages()) + 1,
+    )
 
 
 def _mutate_destinations(geometry: FakeGeometry, pages: list[int], factor: float) -> None:
