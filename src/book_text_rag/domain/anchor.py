@@ -258,7 +258,11 @@ def heading_block(lines: Sequence[Line], title: str, size_min: float | None) -> 
     si hay bloques pero ninguno cubre el título; `(None, "sin_bloque")` si no hay ninguno.
     """
     fallback: list[Line] | None = None
-    for run in bold_runs(lines):
+    vinetas = lineas_de_vineta(lines)
+    for corrida in bold_runs(lines):
+        run = _sin_vinetas(corrida, vinetas)
+        if not run:
+            continue
         if size_min is not None and max(line.size for line in run) < size_min:
             continue
         if fallback is None:
@@ -303,7 +307,11 @@ def candidate_blocks(lines: Sequence[Line], title: str, size_min: float | None) 
     destino. Devolverlos todos permite aplicarlo tanto al anclaje como a la calibración.
     """
     found: list[list[Line]] = []
-    for run in bold_runs(lines):
+    vinetas = lineas_de_vineta(lines)
+    for corrida in bold_runs(lines):
+        run = _sin_vinetas(corrida, vinetas)
+        if not run:
+            continue
         if size_min is not None and max(line.size for line in run) < size_min:
             continue
         block = _block_lines(run, title)
@@ -439,6 +447,42 @@ def _exact_heading_blocks(lines: Sequence[Line], title: str, size_min: float) ->
     return found
 
 
+_GLIFOS_VINETA = ("\u25e6", "\u2022", "\u25aa", "\u2023")
+_TOLERANCIA_VINETA_PT = 2.0
+"""Glifos de viñeta observados en recuadros y listas de `libro_Agentic_Architectural_Patterns.pdf`.
+
+Una línea que empieza con uno de ellos es **contenido de una lista**, nunca un encabezado: los recuadros
+del libro usan 13 pt en negrita para el título de la sección y la misma negrita para las viñetas, de modo
+que la corrida de negrita absorbía el ítem y el bloque empezaba en la viñeta (alineación imposible).
+"""
+
+
+def es_vineta(line: Line) -> bool:
+    """`True` si la línea es un glifo de viñeta (con o sin espacio) o empieza por uno."""
+    return line.text.strip().startswith(_GLIFOS_VINETA)
+
+
+def lineas_de_vineta(lines: Sequence[Line]) -> frozenset[int]:
+    """Identidades de las líneas que son **contenido de una lista**, no encabezado.
+
+    Cubre dos disposiciones reales del libro: el glifo y su texto en la **misma** línea, y el glifo como
+    línea propia junto al texto (difieren en menos de 1 pt de `y0`). Solo se descarta la línea alineada
+    con el glifo: un encabezado legítimo nunca comparte `y0` con una viñeta.
+    """
+    glifos = [line for line in lines if es_vineta(line)]
+    afectadas = {id(line) for line in glifos}
+    for glifo in glifos:
+        for line in lines:
+            if abs(line.y0 - glifo.y0) <= _TOLERANCIA_VINETA_PT:
+                afectadas.add(id(line))
+    return frozenset(afectadas)
+
+
+def _sin_vinetas(run: Sequence[Line], vinetas: frozenset[int]) -> list[Line]:
+    """Descarta de la corrida las líneas que pertenecen a una viñeta de lista."""
+    return [line for line in run if id(line) not in vinetas]
+
+
 def _size_only_runs(lines: Sequence[Line], size_min: float) -> list[list[Line]]:
     """Runs maximales de líneas consecutivas del **mismo tamaño** que alcanza el umbral.
 
@@ -447,8 +491,9 @@ def _size_only_runs(lines: Sequence[Line], size_min: float) -> list[list[Line]]:
     """
     runs: list[list[Line]] = []
     current: list[Line] = []
+    vinetas = lineas_de_vineta(lines)
     for line in lines:
-        if line.size < size_min:
+        if line.size < size_min or id(line) in vinetas:
             if current:
                 runs.append(current)
                 current = []
