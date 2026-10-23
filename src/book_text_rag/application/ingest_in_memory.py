@@ -15,6 +15,7 @@ from book_text_rag.domain.fragmentation import (
     AnchoredUnit,
     FragmentDraft,
     build_units,
+    corpus_end_marker,
     counts_of,
     fragment_span,
     successor_page,
@@ -40,24 +41,30 @@ from book_text_rag.domain.models import (
     IngestTrace,
     Line,
 )
-from book_text_rag.domain.page_furniture import strip_page_number
+from book_text_rag.domain.page_furniture import (
+    HeaderFurniture,
+    detect_header_furniture,
+    strip_header_line,
+    strip_page_number,
+)
 from book_text_rag.ports.extraction import GeometryProvider, TextExtractor
 
 USABLE_Y = 0.5
 
 
-def _clean_pages(pages: list[str]) -> tuple[list[list[str]], int, list[int]]:
+def _clean_pages(pages: list[str], furniture: HeaderFurniture) -> tuple[list[list[str]], int, list[int]]:
     """Excluye el mobiliario de página y registra exclusiones y **páginas** con anomalía (`D-23`)."""
     cleaned: list[list[str]] = []
     excluded = 0
     anomalas: list[int] = []
     for number, page_text in enumerate(pages, start=1):
         result = strip_page_number(page_text.split("\n"), number)
-        cleaned.append(result.lines)
+        header = strip_header_line(result.lines, number, furniture)
+        cleaned.append(header.lines)
         if 25 <= number <= 716:
-            if result.excluded:
+            if result.excluded or header.excluded:
                 excluded += 1
-            if result.anomaly:
+            if result.anomaly or header.anomaly:
                 anomalas.append(number)
     return cleaned, excluded, anomalas
 
@@ -108,7 +115,9 @@ def ingest_in_memory(
     pages = extractor.pages()
     if not pages:
         raise IngestError(ErrorCode.EXTRACTION_FAILED, "el extractor no devolvió páginas")
-    clean_pages, excluded_lines, anomalas = _clean_pages(pages)
+    geometry_pages = {page: geometry_provider.lines(page) for page in range(1, len(pages) + 1)}
+    furniture = detect_header_furniture(geometry_pages)
+    clean_pages, excluded_lines, anomalas = _clean_pages(pages, furniture)
 
     toc = geometry_provider.toc()
     if not toc:
@@ -169,7 +178,7 @@ def ingest_in_memory(
         previous_page = real_page
         previous_y0 = evidence.y0
 
-    spans = unit_spans(toc, anchored, clean_pages)
+    spans = unit_spans(toc, anchored, clean_pages, corpus_end_marker(toc, clean_pages))
     version = document_version(pdf_bytes)
     short = document_version_short(version)
 

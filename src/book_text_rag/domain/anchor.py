@@ -132,6 +132,12 @@ def _canonical_heading(text: str) -> tuple[int | None, str]:
     return part, core_title(rest)
 
 
+def section_key(text: str) -> tuple[int | None, str]:
+    """Clave canónica de un título de apartado, insensible a caja, para identificarlo por nombre."""
+    part, core = _canonical_heading(text)
+    return part, core.casefold()
+
+
 def _variants(text: str) -> set[str]:
     base = norm(text).lower()
     return {

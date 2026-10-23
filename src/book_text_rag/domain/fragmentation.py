@@ -14,10 +14,21 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
+from book_text_rag.domain.anchor import norm, section_key
 from book_text_rag.domain.manifest import CORPUS_END, CORPUS_START, Manifest
-from book_text_rag.domain.models import BlockType, Counts, OutlineUnit, TocEntry, UnitKind
+from book_text_rag.domain.models import (
+    BlockType,
+    Counts,
+    ErrorCode,
+    IngestError,
+    OutlineUnit,
+    TocEntry,
+    UnitKind,
+)
 
 CAPTION_RE = re.compile(r"^(?:Figure|Table)\s+\d+-\d+\.", re.MULTILINE)
+EXCLUDED_SECTION_KEY: tuple[int | None, str] = (None, "index")
+"""Clave canónica del apartado que D-10 pto. (iv) excluye: el Index del libro."""
 
 
 class UnitSpan(BaseModel):
@@ -85,6 +96,47 @@ def blocks_of(lines: Sequence[str]) -> list[list[str]]:
     return blocks
 
 
+def excluded_section(toc: Sequence[TocEntry]) -> TocEntry | None:
+    """Apartado final que D-10 pto. (iv) excluye del corpus: el `Index` de nivel 1.
+
+    Se identifica por su **título canónico exacto**, no por palabras contenidas: `Indexing: Organizing
+    for Speed` (nivel 3) no coincide, y el `Index` alfabético del libro sí. Desde esa entrada en
+    adelante todo es material posterior al cuerpo del libro.
+    """
+    for entry in toc:
+        if entry.level == 1 and section_key(entry.title) == EXCLUDED_SECTION_KEY:
+            return entry
+    return None
+
+
+def corpus_end_marker(toc: Sequence[TocEntry], lines_per_page: Sequence[Sequence[str]]) -> tuple[int, int] | None:
+    """Límite del corpus: página e índice de línea donde **empieza** el apartado excluido.
+
+    El encabezado se localiza en la página que declara el outline por **igualdad canónica exacta**. Si
+    no aparece, la corrida falla de forma explícita: cortar en otro punto cambiaría el corpus en
+    silencio (`D-17`/`RP-02`).
+    """
+    entry = excluded_section(toc)
+    if entry is None:
+        return None
+    if entry.page < 1 or entry.page > len(lines_per_page):
+        raise IngestError(
+            ErrorCode.OUTLINE_UNAVAILABLE,
+            "el apartado excluido declara una página fuera del documento",
+            apartado=entry.title,
+            pagina=entry.page,
+        )
+    for index, line in enumerate(lines_per_page[entry.page - 1]):
+        if norm(line).strip() and section_key(norm(line)) == EXCLUDED_SECTION_KEY:
+            return entry.page, index
+    raise IngestError(
+        ErrorCode.OUTLINE_UNAVAILABLE,
+        "el encabezado del apartado excluido no se localiza en su página declarada",
+        apartado=entry.title,
+        pagina=entry.page,
+    )
+
+
 def build_units(toc: Sequence[TocEntry]) -> list[OutlineUnit]:
     """Unidades del corpus a partir del outline (D-05 pto. 1; corpus = páginas 25-716 de D-01).
 
@@ -93,10 +145,16 @@ def build_units(toc: Sequence[TocEntry]) -> list[OutlineUnit]:
     """
     units: list[OutlineUnit] = []
     stack: list[TocEntry] = []
+    excluded = excluded_section(toc)
+    truncado = False
     for index, entry in enumerate(toc):
         stack = [item for item in stack if item.level < entry.level]
         path = [item.title for item in stack] + [entry.title]
         stack.append(entry)
+        if excluded is not None and entry == excluded:
+            truncado = True
+        if truncado:
+            continue
         if entry.page < CORPUS_START or entry.page > CORPUS_END:
             continue
         has_child = index + 1 < len(toc) and toc[index + 1].level > entry.level
@@ -129,8 +187,13 @@ def unit_spans(
     toc: Sequence[TocEntry],
     anchored: Sequence[AnchoredUnit],
     lines_per_page: Sequence[Sequence[str]],
+    corpus_end: tuple[int, int] | None = None,
 ) -> list[UnitSpan]:
-    """Tramos de contenido por unidad, acotados al corpus (nunca más allá de la página 716)."""
+    """Tramos de contenido por unidad, acotados al corpus (nunca más allá de la página 716).
+
+    `corpus_end` es el marcador de inicio del apartado excluido (`corpus_end_marker`): el último
+    tramo se recorta ahí para que el material excluido no quede absorbido por la unidad anterior.
+    """
     spans: list[UnitSpan] = []
     for position, item in enumerate(anchored):
         unit = item.unit
@@ -144,6 +207,8 @@ def unit_spans(
         if end_page > CORPUS_END or end_page > len(lines_per_page):
             end_page = min(CORPUS_END, len(lines_per_page))
             end_index = len(lines_per_page[end_page - 1])
+        if corpus_end is not None and (end_page, end_index) > corpus_end:
+            end_page, end_index = corpus_end
         if end_page == item.page and end_index < item.text_index:
             raise AssertionError("el fin de la unidad precede a su encabezado")
         spans.append(
