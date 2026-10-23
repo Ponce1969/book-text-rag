@@ -217,6 +217,19 @@ def _resolver_version_solicitada(versiones: tuple[str, ...], solicitada: str) ->
     )
 
 
+def _validar_page_count(valor: int | None) -> int | None:
+    """Valida el `--page-count` declarado: entero >= 1, o `None` si no se declara.
+
+    Es un **metadato declarado**, no un recuento derivado: la CLI no lo calcula del PDF ni del corpus
+    y lo propaga tal cual al caso de uso. Solo se exige que sea un entero positivo.
+    """
+    if valor is None:
+        return None
+    if valor < 1:
+        raise ValueError("--page-count debe ser un entero >= 1")
+    return valor
+
+
 def _mostrar_fragmentos(
     fragmentos: tuple[FragmentRead, ...],
     *,
@@ -314,6 +327,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ingest.add_argument("--fecha", required=True, help="fecha explícita de la referencia")
     ingest.add_argument("--store", required=True, help="ruta explícita del almacén SQLite")
     ingest.add_argument("--source-format", help="formato declarado de la fuente")
+    ingest.add_argument(
+        "--page-count",
+        type=int,
+        help="número de páginas declarado de la fuente; se persiste como metadato, sin derivarlo del contenido",
+    )
     ingest.add_argument(
         "--corpus-start-page",
         type=int,
@@ -501,6 +519,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fecha=str(args.fecha),
                 store=store,
                 source_format=None if args.source_format is None else str(args.source_format),
+                page_count=_validar_page_count(args.page_count),
                 text_extractor=PdftotextExtractor(pdf),
                 geometry=PyMuPdfGeometry(pdf),
                 corpus_start_page=args.corpus_start_page,
