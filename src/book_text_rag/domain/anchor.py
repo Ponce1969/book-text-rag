@@ -439,6 +439,82 @@ def _exact_heading_blocks(lines: Sequence[Line], title: str, size_min: float) ->
     return found
 
 
+def _size_only_runs(lines: Sequence[Line], size_min: float) -> list[list[Line]]:
+    """Runs maximales de líneas consecutivas del **mismo tamaño** que alcanza el umbral.
+
+    No exige negrita: hay libros cuyos encabezados de parte se componen a gran tamaño sin negrita
+    (48 pt frente a un cuerpo de 9,5 pt). La adyacencia vertical usa la misma regla que `bold_runs`.
+    """
+    runs: list[list[Line]] = []
+    current: list[Line] = []
+    for line in lines:
+        if line.size < size_min:
+            if current:
+                runs.append(current)
+                current = []
+            continue
+        if current and line.size == current[-1].size and (line.y0 - current[-1].y0) <= 1.7 * current[-1].size:
+            current.append(line)
+            continue
+        if current:
+            runs.append(current)
+        current = [line]
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _size_only_exact_blocks(lines: Sequence[Line], title: str, size_min: float) -> list[list[Line]]:
+    """Bloques de tamaño suficiente cuyo texto iguala canónicamente el título, sin exigir negrita.
+
+    Un título **solo numérico** —hay libros cuyo outline numera los capítulos con «1», «2»— no tiene
+    núcleo canónico (la normalización descarta los números porque suelen ser folios). En ese caso se
+    exige **igualdad textual exacta** con el bloque, que es lo único que el título declara.
+    """
+    title_part, title_core = _canonical_heading(title)
+    core = title_core.casefold()
+    solo_numerico = not core and title.strip() != ""
+    if not core and not solo_numerico:
+        return []
+    found: list[list[Line]] = []
+    for run in _size_only_runs(lines, size_min):
+        texto = " ".join(line.text for line in run)
+        if solo_numerico:
+            if texto.strip() != title.strip():
+                continue
+            found.append(run)
+            continue
+        block_part, block_core = _canonical_heading(texto)
+        if block_core.casefold() != core:
+            continue
+        if title_part is not None and block_part is not None and title_part != block_part:
+            continue
+        found.append(run)
+    return found
+
+
+def _last_resort_size_only(
+    lines: Sequence[Line], title: str, size_min: float, page: int
+) -> tuple[AnchorEvidence, AnchorLevel, list[Line]] | None:
+    """Último recurso: encabezado exacto y **único** por tamaño, cuando no hay bloque en negrita.
+
+    Solo se evalúa cuando el camino ordinario no encontró ningún candidato, de modo que **no puede
+    alterar** un anclaje que hoy funciona: únicamente convierte un fallo explícito en un anclaje con
+    evidencia de página y tipografía. Si hay más de un candidato, no se elige ninguno (D-17 §5).
+    """
+    blocks = _size_only_exact_blocks(lines, title, size_min)
+    if len(blocks) != 1:
+        return None
+    block = blocks[0]
+    evidence = AnchorEvidence(
+        page=page,
+        y0=round(block[0].y0, 3),
+        y_dest=None,
+        destination_use=DestinationUse.UNUSABLE,
+    )
+    return evidence, AnchorLevel.PAGE_TYPOGRAPHY, block
+
+
 def _anchor_on_next_page(
     lines: Sequence[Line] | None,
     title: str,
@@ -494,6 +570,9 @@ def anchor(
         fallback, exact_count = _anchor_on_next_page(next_lines, title, next_page, threshold, calibration)
         if fallback is not None:
             return fallback
+        ultimo_recurso = _last_resort_size_only(lines, title, threshold, page)
+        if ultimo_recurso is not None:
+            return ultimo_recurso
         if next_page is None:
             raise IngestError(
                 ErrorCode.UNIT_NOT_ANCHORED,
