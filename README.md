@@ -53,6 +53,7 @@ crea el almacén por su cuenta, y ninguno requiere permisos de escritura para co
 | `init` | Crea el esquema v2 o verifica que ya sea compatible. Nunca migra. |
 | `ingest` | Extrae, ancla, fragmenta y persiste el libro (T1 → T2 → T3). |
 | `documents` | Catálogo: documentos, alias, estados de ingesta, metadatos y versiones. |
+| `document` | Ficha pública del documento (`D-07`): versión resuelta, metadatos e `index_version`, estado. Sin fragmentos ni contenido. |
 | `search` | Consulta léxica BM25; `--brief` da una línea de procedencia por resultado. |
 | `show` | Ficha de la versión; `--fragments`, `--limit`, `--all` y `--orden N`. Acepta prefijo único de versión. |
 | `verify` | Auditoría de invariantes de la versión. Informa, nunca repara. |
@@ -114,9 +115,9 @@ tests/           unidad, contrato e integración
 
 - **Búsqueda sólo léxica.** Vectorial e híbrida quedan fuera del MVP (`002`, `D-03`).
 - **`title` siempre `null`** en `get_document`: no hay origen aprobado ni columna donde persistirlo.
-- **`get_document` no está expuesto** por ninguna superficie (no hay transporte ni verbo de CLI).
-  Con **dos o más versiones** de un documento su `status` no es derivable y queda bloqueado por
-  `CD-02/M-14`.
+- **`document` expone `get_document`** por CLI (sin transporte aún). Sin `--document-version` resuelve
+  la única versión; con **dos o más versiones** sin versión indicada exige `document_version`, y con
+  versión explícita no construye ficha: el `status` por versión requiere `CD-02/M-14`.
 - **`index_version` se recalcula**, no se persiste; se emite sólo cuando la respuesta corresponde a
   un único documento y versión con una sola construcción.
 - **Una fuente con bytes inválidos falla en vez de degradarse**: la decodificación es UTF-8 estricta
