@@ -1,0 +1,36 @@
+#!/bin/sh
+# Hook de pre-commit versionado: bloquea el commit si falla algún control.
+#
+# Activación (una sola vez por clon):
+#   git config core.hooksPath .githooks
+#
+# Controles: arquitectura hexagonal, Ruff (lint + formato) y MyPy estricto,
+# con la configuración vigente de pyproject.toml. El intérprete se resuelve del
+# entorno (uv/venv); BTRAG_PYTHON permite sustituirlo de forma explícita.
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -n "${BTRAG_PYTHON:-}" ]; then
+    PY="$BTRAG_PYTHON"
+elif [ -x ".venv/Scripts/python.exe" ]; then
+    PY=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+    PY=".venv/bin/python"
+else
+    PY="python"
+fi
+
+echo "[pre-commit] arquitectura hexagonal"
+"$PY" scripts/check_architecture.py
+
+echo "[pre-commit] ruff check"
+"$PY" -m ruff check .
+
+echo "[pre-commit] ruff format --check"
+"$PY" -m ruff format --check .
+
+echo "[pre-commit] mypy estricto"
+"$PY" -m mypy
+
+echo "[pre-commit] OK: arquitectura, Ruff y MyPy limpios"

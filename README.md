@@ -62,6 +62,42 @@ crea el almacén por su cuenta, y ninguno requiere permisos de escritura para co
 Códigos de salida: `0` correcto (incluye búsqueda sin resultados y almacén degradado informado),
 `1` auditoría ejecutada con la versión no verificada, `2` error operativo o de uso.
 
+## Controles de calidad
+
+Cuatro controles, con la configuración vigente de `pyproject.toml` (sin duplicarla):
+
+```bash
+uv run python scripts/check_architecture.py   # dirección de dependencias entre capas
+uv run ruff check .                           # lint
+uv run ruff format --check .                  # formato
+uv run mypy                                   # tipado estricto (files = ["src"])
+```
+
+`scripts/check_architecture.py` verifica la **dirección** de la arquitectura hexagonal: `domain` no
+importa nada del proyecto; `ports` importa `domain`; `adapters` y `application` importan `domain` y
+`ports`; `cli` es la raíz de composición y puede importar las cuatro. Falla con `archivo:línea` y la
+regla incumplida.
+
+### Hook de pre-commit
+
+El hook vive versionado en `.githooks/pre-commit` y ejecuta los cuatro controles; si alguno falla, el
+commit se aborta. Se activa una sola vez por clon:
+
+```bash
+# Linux / macOS / Git Bash en Windows
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+```powershell
+# PowerShell en Windows
+git config core.hooksPath .githooks
+```
+
+El intérprete se resuelve del entorno: `BTRAG_PYTHON` si está definido, luego `.venv/Scripts/python.exe`
+(Windows), `.venv/bin/python` (POSIX) y por último `python`. Para saltarlo de forma puntual:
+`git commit --no-verify`.
+
 ## Estructura
 
 ```
