@@ -217,6 +217,38 @@ def _local_window_block(
     return validos[0] if len(validos) == 1 else None
 
 
+def _ordered_exact_block(candidates: Sequence[list[Line]], title: str, previous_y0: float | None) -> list[Line] | None:
+    """Encabezado **fuera de la banda superior** con evidencia suficiente para anclarlo.
+
+    Extensión localizada para el caso de un encabezado real a media página, después de contenido
+    (p. ej. «Context» tras una tabla). Exige **las cuatro condiciones a la vez**:
+
+    1. coincidencia **textual exacta** con la entrada del outline (canónica, sin la regla de prefijo);
+    2. **un único** candidato válido para esa entrada en la página;
+    3. **orden estricto** respecto de la unidad anterior anclada en la misma página —si no hay unidad
+       anterior, no hay orden demostrable y no se ancla—;
+    4. el bloque ya superó el umbral de tamaño de la página, de modo que la evidencia es geométrica
+       (tamaño y posición) además de textual.
+
+    No hay ventana de distancia: cualquier ambigüedad devuelve `None` y la unidad falla explícitamente.
+    """
+    title_part, title_core = _canonical_heading(title)
+    core = title_core.casefold()
+    if not core or previous_y0 is None:
+        return None
+    exactos: list[list[Line]] = []
+    for block in candidates:
+        block_part, block_core = _canonical_heading(" ".join(line.text for line in block))
+        if block_core.casefold() != core:
+            continue
+        if title_part is not None and block_part is not None and title_part != block_part:
+            continue
+        if block[0].y0 <= previous_y0:
+            continue
+        exactos.append(block)
+    return exactos[0] if len(exactos) == 1 else None
+
+
 def bold_runs(lines: Sequence[Line]) -> list[list[Line]]:
     """Runs maximales de líneas consecutivas en negrita (adyacencia vertical, D-17 §2.1)."""
     runs: list[list[Line]] = []
@@ -237,11 +269,21 @@ def bold_runs(lines: Sequence[Line]) -> list[list[Line]]:
     return runs
 
 
-def _block_lines(run: Sequence[Line], title: str) -> list[Line]:
-    """Acumula el run hasta cubrir el título, con los topes de 4 líneas y 300 caracteres (D-17 §2.1)."""
+def _block_lines(run: Sequence[Line], title: str, size_min: float | None = None) -> list[Line]:
+    """Acumula el run hasta cubrir el título, con los topes de 4 líneas y 300 caracteres (D-17 §2.1).
+
+    Con `size_min`, el bloque **empieza en la primera línea de tamaño de encabezado**: una corrida de
+    negrita puede arrastrar la última línea del párrafo anterior (9,5 pt junto a un encabezado de 14 pt),
+    y ese texto no forma parte del encabezado. Sin esta poda el bloque empezaba en el cuerpo, la posición
+    del encabezado era la del párrafo y la coincidencia con el título fallaba.
+    """
+    inicio = 0
+    if size_min is not None:
+        while inicio < len(run) and run[inicio].size < size_min:
+            inicio += 1
     accumulated: list[Line] = []
     text = ""
-    for line in run[:MAX_BLOCK_LINES]:
+    for line in run[inicio : inicio + MAX_BLOCK_LINES]:
         accumulated.append(line)
         text = f"{text} {line.text}".strip()
         if len(text) > MAX_BLOCK_CHARS:
@@ -267,7 +309,7 @@ def heading_block(lines: Sequence[Line], title: str, size_min: float | None) -> 
             continue
         if fallback is None:
             fallback = run
-        block = _block_lines(run, title)
+        block = _block_lines(run, title, size_min)
         if block:
             return block, "texto_coincide"
     if fallback is not None:
@@ -314,7 +356,7 @@ def candidate_blocks(lines: Sequence[Line], title: str, size_min: float | None) 
             continue
         if size_min is not None and max(line.size for line in run) < size_min:
             continue
-        block = _block_lines(run, title)
+        block = _block_lines(run, title, size_min)
         if block:
             found.append(block)
     return found
@@ -663,6 +705,20 @@ def anchor(
                     destination_use=DestinationUse.UNUSABLE,
                 )
                 return evidence, AnchorLevel.PAGE_TYPOGRAPHY, window_block
+            # La evidencia del outline manda: si declara un destino, un encabezado a más de la ventana
+            # contradice esa evidencia y la unidad falla. La extensión ordenada solo aplica cuando **no**
+            # hay destino declarado: ahí no existe contra-evidencia, y el anclaje se justifica por texto
+            # exacto, unicidad y orden estricto.
+            if declared_y_dest is None:
+                ordered_block = _ordered_exact_block([block for block, _ in candidates], title, previous_y0)
+                if ordered_block is not None:
+                    evidence = AnchorEvidence(
+                        page=page,
+                        y0=round(ordered_block[0].y0, 3),
+                        y_dest=None,
+                        destination_use=DestinationUse.UNUSABLE,
+                    )
+                    return evidence, AnchorLevel.PAGE_TYPOGRAPHY, ordered_block
         raise IngestError(
             ErrorCode.UNIT_NOT_ANCHORED,
             "el bloque de encabezado queda fuera de la banda superior",
