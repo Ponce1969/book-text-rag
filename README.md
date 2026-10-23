@@ -1,126 +1,177 @@
 # book-text-rag
 
-Recuperación de evidencia textual con procedencia verificable sobre libros técnicos en PDF.
-Prototipo de la Fase 1 de `docs/spec/002-mvp.md`: ingesta reproducible, persistencia SQLite,
-búsqueda léxica BM25 y una CLI administrativa.
+Lexical book retrieval with verifiable provenance: ingest technical PDFs, catalog them, search
+with BM25, and inspect every hit down to its page with full provenance. No silent fallbacks —
+a failed anchor, an unreadable source, or a missing version fails explicitly.
 
-## Requisitos
+Part of a three-project agent knowledge stack: **book-text-rag** (this repo, verbatim evidence
+from books) feeds **agentic-book-graph** (Neo4j knowledge graph of patterns and relations) and
+**agentic-memory** (SQLite answer cache with citations), so agents never pay twice for the same
+question.
 
-- Python **3.13** y [`uv`](https://docs.astral.sh/uv/) para el entorno y las dependencias.
-- **`pdftotext` (Xpdf 4.00)** en el `PATH`: es el extractor efectivo registrado en la traza
-  (`-layout -enc UTF-8`, decodificación UTF-8 estricta).
-- `PyMuPDF` (se instala con el proyecto) para outline y tipografía.
+## Status
+
+Working MVP, validated end to end on three real books (583 + 290 + 730 fragments):
+ingest → catalog → search → inspect → verify, all from the CLI.
+
+- Ingestion derives each book's corpus boundaries from its own outline (no hardcoded pages),
+  anchors headings with geometric and textual evidence, and strips running headers and back matter.
+- Search is lexical BM25 with provenance on every hit (`document_id`, `chunk_id`, short version,
+  pages, section path).
+- Provenance, integrity (`verify`), and health checks are read-only: they report, never repair.
+- Roadmap: vector/hybrid search (`002`, `D-03`), HTTP/MCP transports, multi-version status
+  (`CD-02/M-14`).
+
+## Requirements
+
+- Python **3.13** and [`uv`](https://docs.astral.sh/uv/) for the environment and dependencies.
+- **`pdftotext` (Xpdf 4.00)** on the `PATH`: the effective extractor recorded in the trace
+  (`-layout -enc UTF-8`, strict UTF-8 decoding).
+- `PyMuPDF` (installed with the project) for outline and typography.
 
 ```bash
 uv sync
 ```
 
-## Flujo de uso
+> On Ubuntu ARM64 (e.g. Orange Pi 5 Plus) the same steps apply: install `uv`, install the
+> `poppler-utils` package for `pdftotext`, then `uv sync`. No Windows-only dependency exists.
+
+## Quickstart
 
 ```bash
-# 1. Crear el almacén (esquema v2; nunca migra ni sobrescribe)
+# 1. Create the store (schema v2; never migrates nor overwrites)
 uv run book-text-rag init --store ./store.sqlite
 
-# 2. Ingerir un libro (T1 -> T2 -> T3, transaccional)
+# 2. Ingest a book (T1 -> T2 -> T3, transactional)
 uv run book-text-rag ingest "data/Ingeniería de IA - Chip Huyen (EN).pdf" \
     --document-id huyen-ai-engineering --alias huyen --fecha 2026-10-23 \
     --store ./store.sqlite --source-format pdf
 
-# 3. Ver qué contiene el almacén
+# 3. See what the store holds
 uv run book-text-rag documents --store ./store.sqlite
 
-# 4. Buscar (procedencia compacta con --brief, o contenido completo sin él)
+# 4. Search (compact provenance with --brief, full content without it)
 uv run book-text-rag search "evaluation pipeline" --store ./store.sqlite --top-k 5 --brief
 
-# 5. Leer un fragmento concreto con su procedencia completa
+# 5. Read one fragment with its full provenance
 uv run book-text-rag show --store ./store.sqlite \
-    --document-id huyen-ai-engineering --document-version <prefijo-o-versión> \
+    --document-id huyen-ai-engineering --document-version <prefix-or-version> \
     --orden 245
 
-# 6. Auditar la versión y consultar la salud del almacén
+# 6. Audit the version and check store health
 uv run book-text-rag verify --store ./store.sqlite \
-    --document-id huyen-ai-engineering --document-version <versión>
+    --document-id huyen-ai-engineering --document-version <version>
 uv run book-text-rag health --store ./store.sqlite
 ```
 
-Todos los comandos son de **solo lectura** salvo `init`, `ingest` y `rebuild`. Ninguno repara ni
-crea el almacén por su cuenta, y ninguno requiere permisos de escritura para consultar.
+All commands are **read-only** except `init`, `ingest`, and `rebuild`. None repairs or creates
+the store on its own, and none requires write permission to query.
 
-## Comandos
+## Commands
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `init` | Crea el esquema v2 o verifica que ya sea compatible. Nunca migra. |
-| `ingest` | Extrae, ancla, fragmenta y persiste el libro (T1 → T2 → T3). |
-| `documents` | Catálogo: documentos, alias, estados de ingesta, metadatos y versiones. |
-| `document` | Ficha pública del documento (`D-07`): versión resuelta, metadatos e `index_version`, estado. Sin fragmentos ni contenido. |
-| `search` | Consulta léxica BM25; `--brief` da una línea de procedencia por resultado. |
-| `show` | Ficha de la versión; `--fragments`, `--limit`, `--all` y `--orden N`. Acepta prefijo único de versión. |
-| `verify` | Auditoría de invariantes de la versión. Informa, nunca repara. |
-| `rebuild` | Reconstruye el índice léxico derivado desde la autoridad. |
-| `health` | Disponibilidad del almacén (`ok` / `degraded`) según `D-14`. |
+| `init` | Creates the v2 schema or verifies compatibility. Never migrates. |
+| `ingest` | Extracts, anchors, chunks, and persists the book (T1 → T2 → T3). |
+| `documents` | Catalog: documents, aliases, ingest states, metadata, and versions. |
+| `document` | Public document card (`D-07`): resolved version, metadata, `index_version`, status. No fragments or content. |
+| `search` | Lexical BM25 query; `--brief` gives one provenance line per hit. |
+| `show` | Version card; `--fragments`, `--limit`, `--all`, and `--orden N`. Accepts a unique version prefix. |
+| `verify` | Version invariant audit. Reports, never repairs. |
+| `rebuild` | Rebuilds the derived lexical index from the authority. |
+| `health` | Store availability (`ok` / `degraded`) per `D-14`. |
 
-Códigos de salida: `0` correcto (incluye búsqueda sin resultados y almacén degradado informado),
-`1` auditoría ejecutada con la versión no verificada, `2` error operativo o de uso.
+Exit codes: `0` success (includes empty search and reported degraded store),
+`1` audit run with unverified version, `2` operational or usage error.
 
-## Controles de calidad
+## Quality gates
 
-Cuatro controles, con la configuración vigente de `pyproject.toml` (sin duplicarla):
+Four checks, configured in `pyproject.toml`:
 
 ```bash
-uv run python scripts/check_architecture.py   # dirección de dependencias entre capas
+uv run python scripts/check_architecture.py   # hexagonal layer direction
 uv run ruff check .                           # lint
-uv run ruff format --check .                  # formato
-uv run mypy                                   # tipado estricto (files = ["src"])
+uv run ruff format --check .                  # format
+uv run mypy                                   # strict typing (files = ["src"])
 ```
 
-`scripts/check_architecture.py` verifica la **dirección** de la arquitectura hexagonal: `domain` no
-importa nada del proyecto; `ports` importa `domain`; `adapters` y `application` importan `domain` y
-`ports`; `cli` es la raíz de composición y puede importar las cuatro. Falla con `archivo:línea` y la
-regla incumplida.
+`scripts/check_architecture.py` enforces the hexagonal direction: `domain` imports nothing from
+the project; `ports` imports `domain`; `adapters` and `application` import `domain` and `ports`;
+`cli` is the composition root and may import all four. It fails with `file:line` and the rule.
 
-### Hook de pre-commit
+### Pre-commit hook
 
-El hook vive versionado en `.githooks/pre-commit` y ejecuta los cuatro controles; si alguno falla, el
-commit se aborta. Se activa una sola vez por clon:
+The hook lives versioned in `.githooks/pre-commit` and runs all four checks; a failing check
+aborts the commit. Enable once per clone:
 
 ```bash
-# Linux / macOS / Git Bash en Windows
+# Linux / macOS / Git Bash on Windows
 git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
 ```powershell
-# PowerShell en Windows
+# PowerShell on Windows
 git config core.hooksPath .githooks
 ```
 
-El intérprete se resuelve del entorno: `BTRAG_PYTHON` si está definido, luego `.venv/Scripts/python.exe`
-(Windows), `.venv/bin/python` (POSIX) y por último `python`. Para saltarlo de forma puntual:
+The interpreter resolves from the environment: `BTRAG_PYTHON` if set, then `.venv/Scripts/python.exe`
+(Windows), `.venv/bin/python` (POSIX), finally `python`. To skip once:
 `git commit --no-verify`.
 
-## Estructura
+## Layout
 
 ```
 src/book_text_rag/
-  domain/        reglas puras: identidad, anclaje, fragmentación, disponibilidad
-  ports/         contratos de extracción y de almacén
-  adapters/      pdftotext, PyMuPDF y SQLite (esquema, escritura T1/T2/T3, lectura)
-  application/   casos de uso: ingesta, búsqueda, salud, index_version, get_document
-  cli.py         superficie administrativa
-tests/           unidad, contrato e integración
+  domain/        pure rules: identity, anchoring, chunking, availability
+  ports/         extraction and storage contracts
+  adapters/      pdftotext, PyMuPDF, SQLite (schema, T1/T2/T3 writes, reads)
+  application/   use cases: ingest, search, health, index_version, get_document
+  cli.py         administrative surface
+tests/           unit, contract, integration
 ```
 
-## Estado y límites conocidos
+## Ecosystem
 
-- **Búsqueda sólo léxica.** Vectorial e híbrida quedan fuera del MVP (`002`, `D-03`).
-- **`title` siempre `null`** en `get_document`: no hay origen aprobado ni columna donde persistirlo.
-- **`document` expone `get_document`** por CLI (sin transporte aún). Sin `--document-version` resuelve
-  la única versión; con **dos o más versiones** sin versión indicada exige `document_version`, y con
-  versión explícita no construye ficha: el `status` por versión requiere `CD-02/M-14`.
-- **`index_version` se recalcula**, no se persiste; se emite sólo cuando la respuesta corresponde a
-  un único documento y versión con una sola construcción.
-- **Una fuente con bytes inválidos falla en vez de degradarse**: la decodificación es UTF-8 estricta
-  por decisión (`D-19 §1.2`), así que un PDF cuyo texto traiga pares sustitutos en CESU-8 se rechaza
-  con `decode_error` en lugar de ingerirse con caracteres alterados.
-- Los libros de `data/` **no** se versionan (tamaño y derechos); ver `data/README.md`.
+```
+                            ┌────────────────────────┐
+                            │  Agent (pi-dev, CLI)   │
+                            └───────────┬────────────┘
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    ▼                                       ▼
+        ┌─────────────────────┐               ┌─────────────────────┐
+        │   book-text-rag     │               │ agentic-book-graph  │
+        │   (this repo)       │               │ (Neo4j graph)       │
+        │ verbatim evidence   │               │ patterns, relations │
+        └─────────┬───────────┘               └─────────┬───────────┘
+                  │         both feed                   │
+                  └──────────────┬──────────────────────┘
+                                 ▼
+                    ┌─────────────────────┐
+                    │   agentic-memory    │
+                    │ (SQLite cache)      │
+                    │ verified answers   │
+                    └─────────────────────┘
+```
+
+- **book-text-rag** answers "what does the book actually say, and where?" — fragments with
+  page-level provenance.
+- **agentic-book-graph** answers "how do the ideas connect?" — entities and relations in Neo4j.
+- **agentic-memory** answers "did we already solve this?" — a deterministic SQLite cache so
+  agents never pay twice for the same question.
+
+## Known limits and roadmap
+
+- **Lexical search only.** Vector and hybrid stay out of the MVP (`002`, `D-03`).
+- **`title` always `null`** in `get_document`: no approved source and no column to persist it.
+- **`document` exposes `get_document`** via CLI (no transport yet). Without `--document-version` it
+  resolves the single version; with **two or more versions** and no version it requires
+  `document_version`, and with an explicit version it builds no card: per-version `status` needs
+  `CD-02/M-14`.
+- **`index_version` is recomputed**, not persisted; emitted only when the answer maps to a single
+  document and version with a single build.
+- **An invalid source fails instead of degrading**: strict UTF-8 decoding by decision (`D-19` §1.2),
+  so a PDF whose text carries CESU-8 surrogate pairs is rejected with `decode_error` instead of
+  being ingested with altered characters.
+- Books under `data/` are **not** versioned (size and rights); see `data/README.md`.
