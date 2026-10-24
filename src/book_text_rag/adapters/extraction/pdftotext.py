@@ -20,16 +20,29 @@ _VERSION_RE = re.compile(r"version\s+(\S+)", re.IGNORECASE)
 
 
 def decode_output(blob: bytes) -> str:
-    """Decodifica la salida del extractor en UTF-8 **estricto**, con una excepción declarada.
+    """Decodifica la salida del extractor en UTF-8 **estricto** y normaliza el fin de línea.
 
-    Sin `errors="replace"`, sin BOM y sin normalización posterior: los errores se manifiestan en vez
-    de ocultarse (D-20 §5, `decode_error`).
+    Sin `errors="replace"`, sin BOM y sin re-codificación: los errores se manifiestan en vez de
+    ocultarse (D-20 §5, `decode_error`).
 
     **Excepción aprobada (D-19 §1.2, enmienda 2026-10-23).** Algunos PDF traen caracteres astrales
     codificados en **CESU-8**: dos surrogates UTF-8 consecutivos (p. ej. `ED A0 BE ED B7 A0` para
     U+1F9E0) en lugar de la secuencia UTF-8 de cuatro bytes. Esos pares **se recomponen** en el carácter
     real, que es lo que el autor escribió; no se sustituye nada. Un surrogate **no emparejado** o cualquier
     otra secuencia irreparable sigue siendo `decode_error`: la política no se vuelve permisiva.
+
+    **Fin de línea normalizado (2026-10-23).** `pdftotext` escribe el fin de línea de su plataforma:
+    CRLF en Windows, LF en Linux. Sin normalizar, el **mismo PDF con el mismo extractor y las mismas
+    banderas** produce `content_hash` distintos según el sistema operativo, y el campo de integridad deja
+    de ser comparable entre máquinas. El contenido lógico (`D-11` §3) no depende del SO, así que aquí se
+    fija `\\n` para los dos fines de línea conocidos; es la única normalización del texto extraído.
+
+    **Caracteres de formato invisibles (2026-10-23).** Medido sobre el corpus: con el mismo PDF y el
+    mismo Xpdf 4.00, el binario de Windows y el compilado para Linux emiten los mismos U+200B (espacio
+    de ancho cero) y U+2060 (word joiner) **en posiciones distintas**; el texto visible es idéntico.
+    Son marcas de composición del extractor, no del autor, así que se descartan: sin ellas el contenido
+    coincide en las dos plataformas. Solo se eliminan esos dos caracteres, los observados en la
+    evidencia; no se toca ningún otro invisible.
     """
     try:
         text = blob.decode("utf-8", errors="surrogatepass")
@@ -42,7 +55,26 @@ def decode_output(blob: bytes) -> str:
     text = _recomponer_pares_cesu8(text)
     if text.startswith("\ufeff"):
         raise IngestError(ErrorCode.DECODE_ERROR, "la salida del extractor trae BOM")
-    return text
+    return _normalizar_fin_de_linea(_descartar_formato_invisible(text))
+
+
+def _normalizar_fin_de_linea(texto: str) -> str:
+    """Fija `\\n` como fin de línea único: CRLF (Windows) y CR solo también pasan a LF."""
+    if "\r" not in texto:
+        return texto
+    return texto.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _descartar_formato_invisible(texto: str) -> str:
+    """Elimina los caracteres de composición del extractor, invisibles y sin significado propio.
+
+    Solo los dos medidos en la evidencia: U+200B (espacio de ancho cero) y U+2060 (word joiner). Su
+    **posición** depende de la plataforma aunque el texto visible no, así que conservarlos haría que el
+    hash del mismo contenido difiriera entre sistemas operativos.
+    """
+    if "\u200b" not in texto and "\u2060" not in texto:
+        return texto
+    return texto.replace("\u200b", "").replace("\u2060", "")
 
 
 def _recomponer_pares_cesu8(texto: str) -> str:
