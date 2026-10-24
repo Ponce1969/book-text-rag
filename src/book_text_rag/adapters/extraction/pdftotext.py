@@ -16,6 +16,7 @@ from book_text_rag.domain.models import ErrorCode, IngestError
 
 FLAGS = ("-layout", "-enc", "UTF-8")
 FLAGS_TEXT = "-layout -enc UTF-8"
+_IDENTIFICADOR_OCULTO = re.compile(r"(?:idx_[0-9a-f]{8})+")
 _VERSION_RE = re.compile(r"version\s+(\S+)", re.IGNORECASE)
 
 
@@ -43,6 +44,12 @@ def decode_output(blob: bytes) -> str:
     Son marcas de composición del extractor, no del autor, así que se descartan: sin ellas el contenido
     coincide en las dos plataformas. Solo se eliminan esos dos caracteres, los observados en la
     evidencia; no se toca ningún otro invisible.
+
+    **Identificadores de texto oculto (2026-10-23).** Un PDF puede traer una capa de texto invisible
+    cuyos glifos llevan nombres generados, y el extractor los emite como `idx_` + ocho dígitos
+    hexadecimales, a veces encadenados y pegados a la palabra siguiente (`idx_0b524786With`). Medido en
+    el corpus: 1.196 apariciones en 628 de los 730 fragmentos del tercer libro, y ninguna en los otros
+    dos. No son prosa del autor: se descartan para que el contenido sea lo que el libro dice.
     """
     try:
         text = blob.decode("utf-8", errors="surrogatepass")
@@ -55,7 +62,8 @@ def decode_output(blob: bytes) -> str:
     text = _recomponer_pares_cesu8(text)
     if text.startswith("\ufeff"):
         raise IngestError(ErrorCode.DECODE_ERROR, "la salida del extractor trae BOM")
-    return _normalizar_fin_de_linea(_descartar_formato_invisible(text))
+    text = _descartar_formato_invisible(text)
+    return _normalizar_fin_de_linea(_descartar_identificadores_ocultos(text))
 
 
 def _normalizar_fin_de_linea(texto: str) -> str:
@@ -63,6 +71,13 @@ def _normalizar_fin_de_linea(texto: str) -> str:
     if "\r" not in texto:
         return texto
     return texto.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _descartar_identificadores_ocultos(texto: str) -> str:
+    """Quita los `idx_<8 hex>` del texto oculto del PDF, incluso encadenados y pegados a una palabra."""
+    if "idx_" not in texto:
+        return texto
+    return _IDENTIFICADOR_OCULTO.sub("", texto)
 
 
 def _descartar_formato_invisible(texto: str) -> str:

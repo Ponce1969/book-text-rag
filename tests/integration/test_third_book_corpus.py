@@ -34,11 +34,16 @@ def test_recuento_de_unidades_del_corpus(tercer_libro: IngestResult) -> None:
 
 
 def test_recuento_de_fragmentos(tercer_libro: IngestResult) -> None:
-    assert len(tercer_libro.fragments) == 730
+    """El texto oculto (`idx_<hash>`) se descarta antes de fragmentar: 729, no 730."""
+    assert len(tercer_libro.fragments) == 729
 
 
 def test_lineas_de_numeros_de_pagina_excluidas(tercer_libro: IngestResult) -> None:
     assert tercer_libro.trace.counts.page_number_lines_excluded == 494
+
+
+def test_sin_texto_oculto_en_el_contenido(tercer_libro: IngestResult) -> None:
+    assert not any("idx_" in fragment.content for fragment in tercer_libro.fragments)
 
 
 def test_sin_paginas_anomalas(tercer_libro: IngestResult) -> None:

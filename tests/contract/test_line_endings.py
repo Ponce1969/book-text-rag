@@ -45,6 +45,19 @@ def test_los_invisibles_de_composicion_se_descartan() -> None:
     assert decode_output("pala\u200bbra\u2060 unida".encode()) == "palabra unida"
 
 
+def test_los_identificadores_de_texto_oculto_se_descartan() -> None:
+    """`idx_<8 hex>` es texto invisible del PDF: se elimina suelto, encadenado y pegado a una palabra."""
+    pegado = b"Chapter 1.\nidx_0b524786With these practices"
+    assert decode_output(pegado) == "Chapter 1.\nWith these practices"
+    assert decode_output(b"a idx_ffafbff6 b") == "a  b"
+    assert decode_output(b"idx_0cf8851eidx_75d1a50e fin") == " fin"
+
+
+def test_los_identificadores_reales_no_se_tocan() -> None:
+    """Solo el patrón exacto del extractor: un nombre técnico legítimo se conserva."""
+    assert decode_output(b"idx_value y index_deadbeef y idx_short") == "idx_value y index_deadbeef y idx_short"
+
+
 def test_el_orden_plataforma_dependiente_de_los_invisibles_no_cambia_el_hash() -> None:
     """Caso real del ordinal 58: mismas marcas en otra posición, mismo contenido lógico."""
     en_windows = decode_output("a\u200bb cd\u2060 e".encode("utf-8"))
