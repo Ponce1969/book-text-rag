@@ -205,6 +205,12 @@ build of the same Xpdf 4.00. Ordinal, page, `chunk_id` and the rest of the text 
 still resolves to the same place on both machines. Accepted on 2026-10-24 rather than chased through
 compiler differences.
 
+`index_version` is **not** meant to be comparable across machines: `D-11` §4 makes it a hash of seven
+inputs, and one of them is the SQLite library version. Same corpus, same `document_version`, two
+stores: Windows with SQLite 3.50.4 gives `814639169f9e` and Ubuntu/aarch64 with SQLite 3.47.1 gives
+`6902c6191388` for the same GraphRAG construction. The identifiers that *are* comparable are
+`chunk_id` and `content_hash`, which is what a cached citation needs.
+
 On Linux, `pdftotext` must be **Xpdf 4.00**, not poppler: poppler fragments the same PDFs
 differently (292 fragments and 32 table blocks instead of 290 and 31 for GraphRAG) and breaks
 `chunk_id` comparability.
