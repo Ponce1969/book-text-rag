@@ -175,3 +175,36 @@ tests/           unit, contract, integration
   so a PDF whose text carries CESU-8 surrogate pairs is rejected with `decode_error` instead of
   being ingested with altered characters.
 - Books under `data/` are **not** versioned (size and rights); see `data/README.md`.
+
+## Reproducibility across platforms
+
+The corpus payload is the text a PDF carries, not the platform that extracts it, so ingestion
+normalizes the three artifacts an extractor leaves in the output:
+
+| Artifact | Why it differs across platforms | Normalization |
+| --- | --- | --- |
+| Line endings | Windows writes `CRLF` | `CRLF` and `CR` become `LF` |
+| `U+200B`, `U+2060` | Xpdf places zero-width marks by platform | both are dropped |
+| `idx_<8 hex>` | hidden text layer named per glyph | dropped, even chained or glued to a word |
+
+The first two live in `_normalizar_fin_de_linea` and `_descartar_formato_invisible`; the third in
+`_descartar_identificadores_ocultos`, all at the extraction port (`adapters/extraction/pdftotext.py`).
+
+**Verified corpus** (three books, 1,602 fragments), identical between Windows/MSYS2 and
+Ubuntu/aarch64, both running Xpdf 4.00:
+
+| Book | Fragments | `content_hash` digest |
+| --- | ---: | --- |
+| Lexical pilot | 583 | `a20fbea8` |
+| Agentic GraphRAG | 290 | `accfdd23` |
+| Agentic Architectural Patterns | 729 | `3106762f` |
+
+**One documented residual**: fragment 169 of the pilot book carries a mathematical formula whose
+glyphs `∏` and an italic `n` are recovered by the MSYS2 build and not by the self-compiled ARM64
+build of the same Xpdf 4.00. Ordinal, page, `chunk_id` and the rest of the text match, so a citation
+still resolves to the same place on both machines. Accepted on 2026-10-24 rather than chased through
+compiler differences.
+
+On Linux, `pdftotext` must be **Xpdf 4.00**, not poppler: poppler fragments the same PDFs
+differently (292 fragments and 32 table blocks instead of 290 and 31 for GraphRAG) and breaks
+`chunk_id` comparability.
