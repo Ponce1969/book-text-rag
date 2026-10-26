@@ -1,0 +1,39 @@
+[Unit]
+Description=book-text-rag MCP server (read-only corpus query)
+Documentation=https://github.com/Ponce1969/book-text-rag
+After=network-online.target
+Wants=network-online.target
+# D-08: the port must be re-checked before deployment, and this unit must never
+# share a port with mcp-server.service (:8003).
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=gonzalo
+Group=gonzalo
+WorkingDirectory=/home/gonzalo/Gonzalo_codigo/book-text-rag
+EnvironmentFile=/home/gonzalo/.config/book-text-rag/mcp.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/gonzalo/Gonzalo_codigo/book-text-rag/.venv/bin/book-text-rag-mcp
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+# D-06/§S8: no secret, query text or retrieved content in the journal.
+StandardOutput=journal
+StandardError=journal
+
+# Hardening. The process only reads the corpus and never writes to disk.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target
