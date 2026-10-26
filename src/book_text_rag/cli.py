@@ -1,7 +1,10 @@
 """CLI administrativa para inicializar, ingerir, reconstruir, verificar, consultar y auditar la salud.
 
 Referencias: `001` §5 y §7; D-07, D-08, D-12, D-13, D-14, D-15, D-22 §5 y D-25.
-La CLI funciona sin HTTP ni MCP. La ingesta persistente ejecuta T1 → T2 → T3; `rebuild` reconstruye el
+La CLI funciona sin HTTP ni MCP. Además de los subcomandos administrativos, este módulo es la raíz
+de composición del servicio MCP: `main_mcp` (`book-text-rag-mcp`) arma `aplicacion_mcp` sobre los
+mismos casos de uso, en un proceso independiente y de solo lectura (S5/S6).
+La ingesta persistente ejecuta T1 → T2 → T3; `rebuild` reconstruye el
 índice léxico derivado de una versión desde la autoridad; `verify` sólo informa y `search`/`show`
 sólo leen: ninguna operación repara ni inicializa automáticamente el almacén. `health` informa la
 disponibilidad del almacén (`D-14`) y, cuando no está disponible, `search` y `show` responden
@@ -19,13 +22,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
+from starlette.types import ASGIApp
+
 from book_text_rag.adapters.extraction.geometry import PyMuPdfGeometry
 from book_text_rag.adapters.extraction.pdftotext import PdftotextExtractor
+from book_text_rag.adapters.mcp import (
+    ConfiguracionInvalida,
+    ConfiguracionMcp,
+    configurar_registro,
+    construir_aplicacion,
+    construir_servidor,
+    desde_entorno,
+)
 from book_text_rag.adapters.storage.sqlite import SqliteStore
 from book_text_rag.application.get_document import EstadoPorVersionNoDefinido, get_document
 from book_text_rag.application.health import exigir_disponible, health
@@ -165,6 +180,25 @@ def _formatear_resultado_breve(resultado: SearchResult) -> str:
         f"chunk_id={resultado.chunk_id} "
         f"version={resultado.document_version[:12]} paginas={paginas} seccion={ruta}"
     )
+
+
+def _proyeccion_mcp(resultado: SearchResult) -> dict[str, object]:
+    """Proyección JSON de un resultado para la herramienta `search`, con la procedencia de `D-07`.
+
+    Incluye el contenido recuperado, que viaja **solo** en la respuesta al cliente: nunca se registra
+    en los logs (S8), a diferencia de la CLI, que lo imprime por diseño en su salida estándar.
+    """
+    return {
+        "rank": resultado.rank,
+        "score": resultado.score,
+        "document_id": resultado.document_id,
+        "document_version": resultado.document_version,
+        "chunk_id": resultado.chunk_id,
+        "section_path": list(resultado.section_path),
+        "pdf_page_start": resultado.pdf_page_start,
+        "pdf_page_end": resultado.pdf_page_end,
+        "content": resultado.content,
+    }
 
 
 def _formatear_fragmento(fragmento: FragmentRead) -> str:
@@ -673,6 +707,89 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (StoreError, IngestError) as error:
         _reportar_error(error)
         return 2
+
+
+def aplicacion_mcp(configuracion: ConfiguracionMcp) -> ASGIApp:
+    """Compone la app ASGI del servicio MCP sobre los casos de uso existentes (raíz de composición).
+
+    `book-text-rag-mcp` y las pruebas de contrato comparten esta fábrica, de modo que el transporte
+    que se prueba es el que se despliega. Es **solo lectura**: las tres herramientas se fijan a
+    `search_lexical`, `get_document` y `health`; no existe ingesta, rebuild ni operación alguna de
+    escritura (S5). El almacén se abre por los caminos de lectura del adaptador SQLite, en `mode=ro`.
+    """
+    store = SqliteStore(configuracion.almacen)
+
+    def buscar(*, query: str, top_k: int, document_ids: tuple[str, ...] | None) -> dict[str, object]:
+        exigir_disponible(store)
+        resultados = search_lexical(store, query=query, top_k=top_k, document_ids=document_ids)
+        identidad = index_version_de_resultados(store, resultados)
+        return {
+            "mode": "lexical",
+            "index_version": identidad,
+            "resultados": [_proyeccion_mcp(resultado) for resultado in resultados],
+        }
+
+    def obtener_documento(document_id: str, document_version: str | None) -> dict[str, object]:
+        try:
+            vista = get_document(store, document_id, document_version)
+        except EstadoPorVersionNoDefinido as error:
+            # Sin CD-02/M-14 no hay `status` por versión que publicar: se rechaza con el mismo
+            # texto estático que usa la CLI, sin fabricar respuesta (texto solo con el identificador).
+            raise ValueError(str(error)) from error
+        return {
+            "document_id": vista.document_id,
+            "document_version": vista.document_version,
+            "title": vista.title,
+            "source_format": vista.source_format,
+            "page_count": vista.page_count,
+            "index_version": vista.index_version,
+            "status": vista.status.value,
+        }
+
+    def estado() -> dict[str, object]:
+        resumen = health(store)
+        return {
+            "status": resumen.status,
+            "dependencies": list(resumen.dependencies),
+            "available_modes": list(resumen.available_modes),
+        }
+
+    servidor = construir_servidor(
+        buscar=buscar,
+        obtener_documento=obtener_documento,
+        estado=estado,
+        timeout_consulta=configuracion.timeout_consulta,
+    )
+    return construir_aplicacion(servidor, configuracion)
+
+
+def main_mcp() -> int:
+    """Punto de entrada del console script `book-text-rag-mcp` (proceso independiente, S6).
+
+    La configuración es exclusivamente por entorno y falla cerrada: sin dirección de enlace o sin
+    token el proceso termina con código 2 **sin abrir puerto ni almacén** (S2, S3). En marcha sirve
+    Streamable HTTP en la dirección configurada; el arranque registra solo metadatos —dirección,
+    puerto y timeout— sin token ni ruta del almacén (S8).
+    """
+    try:
+        configuracion = desde_entorno(os.environ)
+    except ConfiguracionInvalida as error:
+        print(f"error [configuración]: {error}", file=sys.stderr)
+        return 2
+    app = aplicacion_mcp(configuracion)
+    # `configurar_registro` fija la política S8 (nivel de servicio y sin trozos SSE crudos);
+    # `log_config=None` la conserva: uvicorn no sustituye los registradores ni sus niveles.
+    configurar_registro()
+    logging.getLogger(__name__).info(
+        "servicio mcp: direccion=%s puerto=%d timeout_consulta_s=%s",
+        configuracion.direccion,
+        configuracion.puerto,
+        f"{configuracion.timeout_consulta:g}",
+    )
+    import uvicorn
+
+    uvicorn.run(app, host=configuracion.direccion, port=configuracion.puerto, log_config=None)
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
