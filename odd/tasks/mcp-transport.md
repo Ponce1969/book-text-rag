@@ -68,3 +68,39 @@ debe seguir en verde sin excepciones nuevas.
 `mcp-server.service` (bookgraph) escuchando en `100.106.85.109:8003`, que no se toca; almacén
 `/home/gonzalo/datos/book-text-rag/corpus.sqlite` (13.5 MB, `gonzalo:gonzalo`, 644); `uv 0.7.8` en
 `/home/gonzalo/.local/bin/uv`.
+
+**L3 — Validación end-to-end (pasos 1 y 2, más comprobaciones 1, 3 y 4).** Evidencia recogida desde
+Windows contra `http://100.106.85.109:8020/mcp`.
+
+Registro en el consumidor: se agregó **una** clave (`book-text-rag`) a `~/.pi/agent/mcp-adapter.json`,
+con respaldo `mcp-adapter.json.bak-2026-10-25`. Las **seis entradas anteriores quedaron idénticas**,
+verificado por igualdad profunda de las estructuras y no por inspección visual. El token vive en la
+variable de usuario de Windows `BOOK_TEXT_RAG_MCP_TOKEN` (64 caracteres): no está en el JSON, ni en
+scripts, ni en registros.
+
+Protocolo: `initialize` HTTP 200 con `Mcp-Session-Id`, `notifications/initialized` HTTP 202,
+`tools/list` HTTP 200 con **exactamente** `search`, `get_document` y `health`. `health` devuelve
+`status: ok`, `dependencies: []`, `available_modes: ["lexical"]`. `get_document` de
+`graphrag-agentico` devuelve los **siete** campos de `D-07` con `page_count: 692` e
+`index_version: 6902c6191388`.
+
+Comparación MCP vs CLI con `search "vector database"`, idénticos **y en el mismo orden**:
+`graphrag-agentico:0f31856f5415:13`, `huyen-ai-engineering:0cd2fc8424e5:324`,
+`agentic-architectural-patterns:425c95335234:466`.
+
+Solo lectura sobre el almacén real: SHA-256 `92e68755f97822d332ee33212c8a9494d4c21ad366cf689dd985022635c849f8`
+y `mtime` `2026-10-25 01:33:54.621` idénticos antes y después de las tres llamadas; el directorio
+contiene solo `corpus.sqlite`, sin `-wal` ni `-shm` nuevos.
+
+Red: `http://192.168.1.100:8020/mcp` (IP de LAN de la propia Pi) rechaza la conexión; la dirección
+Tailscale responde `401` sin credenciales. El enlace no es amplio.
+
+Registros: 31 líneas en total, **0** apariciones del token, **0** de la consulta, **0** de la ruta del
+almacén y **0** de `Bearer`. Lo único que se registra es metadato: `herramienta=search resultado=ok
+duracion_ms=8`.
+
+Corrección de expectativa, no defecto: `get_document` no expone un conteo de fragmentos porque
+`DocumentView` tiene los siete campos de `D-07` y la decisión dice «sin fragmentos ni rutas».
+
+Pendiente para cerrar T7: el **reinicio controlado** (requiere `sudo` con contraseña, que no está
+disponible de forma no interactiva) y el **consumidor Pi en sesión nueva**.
