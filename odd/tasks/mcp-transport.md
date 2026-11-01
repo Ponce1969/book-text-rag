@@ -146,3 +146,34 @@ Cierre del consumidor, ejercido **con el cliente propio de Pi**, no con un clien
 
 Queda pendiente, fuera del alcance del agente: el **reinicio controlado** del servicio en la Pi, que
 requiere `sudo` con contraseña.
+
+**L5 — Diagnóstico interno de los rechazos 401 (incremento autorizado, 2026-10-31).** Alcance
+limitado al código de autenticación y sus pruebas.
+
+Motivación: el 401 del cliente de Pi era indistinguible de un token incorrecto, y la causa real —una
+variable ausente— costó una sesión de diagnóstico. El servicio ahora registra **el motivo** y no
+cambia nada hacia afuera.
+
+Cambio en `adapters/mcp/auth.py`: `_autorizado` pasa a `_motivo_rechazo`, que devuelve `None` cuando
+la petición se acepta y uno de cuatro motivos cuando se rechaza: `sin_cabecera`, `bearer_vacio`,
+`esquema_incorrecto`, `token_no_coincide`. El conjunto de peticiones aceptadas es **el mismo de
+antes** (esquema `bearer`, separador presente, igualdad exacta con `hmac.compare_digest`), la
+respuesta externa sigue siendo byte por byte `{"error": "unauthorized"}` con `www-authenticate`, y el
+registro emite solo `autenticacion_rechazada motivo=<motivo>`: nunca la cabecera, ni el token
+recibido, ni el esperado, ni el cuerpo de la petición.
+
+Pruebas nuevas en `tests/contract/test_mcp_server.py`:
+`test_el_rechazo_registra_su_motivo_sin_revelar_nada` parametrizada con los cinco casos (cabecera
+ausente, `Bearer` suelto, `Bearer` con espacios, esquema `Basic`, token que no coincide) y
+`test_los_cuatro_motivos_son_distintos_y_cubren_el_contrato`. Cada caso comprueba el 401, el cuerpo
+exacto y que ni el token configurado ni la credencial enviada aparecen en los registros.
+
+Evidencia: `597 passed` (591 previas + 6 nuevas), Ruff y format limpios, MyPy estricto sin issues,
+guardián de arquitectura OK con 42 imports entre capas. `Risk: item 2` (código de autenticación).
+
+Regla operativa documentada en `deploy/mcp.env.example`: las variables se heredan al iniciar cada
+proceso; tras crear o rotar el token hay que iniciar un Pi nuevo con el entorno actualizado. No hace
+falta reiniciar la Orange Pi, y un gestor de paneles como Herdr conserva intérpretes viejos.
+
+Pendiente, fuera del alcance de este incremento: proponer el parche a `pi-mcp-adapter` (que los
+`headers` fallen cerrado, igual que ya lo hace la `url` vía `getMissingEnvVars`).

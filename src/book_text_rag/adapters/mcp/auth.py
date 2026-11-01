@@ -15,11 +15,21 @@ protocolo MCP siguen siendo los del SDK oficial `mcp` (S1).
 from __future__ import annotations
 
 import hmac
+import logging
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 _ESQUEMA_BEARER = b"bearer"
 _CUERPO_401 = b'{"error": "unauthorized"}'
+
+# Motivos internos del rechazo. Se registran como metadato y **no** cambian la decisión: los cuatro
+# rechazan. Solo hacen legible un 401 que, sin ellos, es indistinguible de un token incorrecto.
+SIN_CABECERA = "sin_cabecera"
+BEARER_VACIO = "bearer_vacio"
+ESQUEMA_INCORRECTO = "esquema_incorrecto"
+TOKEN_NO_COINCIDE = "token_no_coincide"
+
+logger = logging.getLogger(__name__)
 
 
 class AutenticacionBearer:
@@ -27,6 +37,8 @@ class AutenticacionBearer:
 
     No hay ruta pública sin barrera: el `401` se emite para cualquier método y camino, y la
     respuesta no distingue token ausente de token erróneo (sin oráculo) ni revela el esperado.
+    El motivo del rechazo se registra como metadato de diagnóstico: nunca la cabecera, ni el token
+    recibido, ni el esperado.
     """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
@@ -37,7 +49,9 @@ class AutenticacionBearer:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        if not self._autorizado(scope):
+        motivo = self._motivo_rechazo(scope)
+        if motivo is not None:
+            logger.info("autenticacion_rechazada motivo=%s", motivo)
             await send(
                 {
                     "type": "http.response.start",
@@ -53,10 +67,18 @@ class AutenticacionBearer:
             return
         await self.app(scope, receive, send)
 
-    def _autorizado(self, scope: Scope) -> bool:
-        """`True` solo con `Bearer <token>` exacto (esquema sin distinción de mayúsculas, RFC 6750)."""
-        cabecera = next((valor for nombre, valor in scope.get("headers", ()) if nombre == b"authorization"), b"")
+    def _motivo_rechazo(self, scope: Scope) -> str | None:
+        """`None` solo con `Bearer <token>` exacto (esquema sin distinción de mayúsculas, RFC 6750).
+
+        Clasifica el rechazo para el registro. La comparación y el conjunto de peticiones aceptadas
+        son los mismos que antes: esquema `bearer`, separador presente e igualdad exacta del token.
+        """
+        cabecera = next((valor for nombre, valor in scope.get("headers", ()) if nombre == b"authorization"), None)
+        if cabecera is None:
+            return SIN_CABECERA
         esquema, separador, credenciales = cabecera.partition(b" ")
-        if not separador or esquema.lower() != _ESQUEMA_BEARER:
-            return False
-        return hmac.compare_digest(credenciales, self._token)
+        if esquema.lower() != _ESQUEMA_BEARER:
+            return ESQUEMA_INCORRECTO
+        if not separador or not credenciales.strip():
+            return BEARER_VACIO
+        return None if hmac.compare_digest(credenciales, self._token) else TOKEN_NO_COINCIDE

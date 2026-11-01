@@ -38,7 +38,13 @@ from book_text_rag.adapters.mcp import (
     configurar_registro,
     desde_entorno,
 )
-from book_text_rag.adapters.mcp.auth import AutenticacionBearer
+from book_text_rag.adapters.mcp.auth import (
+    BEARER_VACIO,
+    ESQUEMA_INCORRECTO,
+    SIN_CABECERA,
+    TOKEN_NO_COINCIDE,
+    AutenticacionBearer,
+)
 from book_text_rag.adapters.storage.sqlite import SqliteStore
 from book_text_rag.cli import aplicacion_mcp
 from book_text_rag.domain.identity import chunk_id, content_hash
@@ -454,6 +460,57 @@ def test_peticion_sin_token_responde_401(tmp_path: Path) -> None:
             assert respuesta.headers["www-authenticate"].startswith("Bearer")
 
     asyncio.run(caso())
+
+
+@pytest.mark.parametrize(
+    ("cabecera", "motivo"),
+    [
+        (None, SIN_CABECERA),
+        ("Bearer", BEARER_VACIO),
+        ("Bearer    ", BEARER_VACIO),
+        ("Basic dXN1YXJpbzpjbGF2ZQ==", ESQUEMA_INCORRECTO),
+        ("Bearer token-erroneo-secreto", TOKEN_NO_COINCIDE),
+    ],
+)
+def test_el_rechazo_registra_su_motivo_sin_revelar_nada(
+    tmp_path: Path, cabecera: str | None, motivo: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """El 401 se mantiene idéntico hacia afuera; hacia adentro queda el motivo, sin cabecera ni token."""
+    app = _aplicacion(_sembrar(tmp_path))
+    cabeceras = dict(_ACEPTAR)
+    if cabecera is not None:
+        cabeceras["Authorization"] = cabecera
+
+    with caplog.at_level(logging.DEBUG):
+        configurar_registro()
+
+        async def caso() -> None:
+            async with (
+                _servicio(app),
+                httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=BASE) as cliente,
+            ):
+                respuesta = await cliente.post("/mcp", json=_inicializacion(), headers=cabeceras)
+
+                assert respuesta.status_code == 401
+                assert respuesta.text == '{"error": "unauthorized"}'
+
+        asyncio.run(caso())
+
+    registros = "\n".join(registro.getMessage() for registro in caplog.records)
+    assert f"autenticacion_rechazada motivo={motivo}" in registros
+    assert TOKEN not in registros
+    if cabecera is not None:
+        assert cabecera not in registros
+        credencial = cabecera.partition(" ")[2].strip()
+        if credencial:
+            assert credencial not in registros
+
+
+def test_los_cuatro_motivos_son_distintos_y_cubren_el_contrato() -> None:
+    """Los cuatro motivos existen por separado y el conjunto es exactamente el declarado."""
+    motivos = {SIN_CABECERA, BEARER_VACIO, ESQUEMA_INCORRECTO, TOKEN_NO_COINCIDE}
+    assert len(motivos) == 4
+    assert all(isinstance(motivo, str) and motivo for motivo in motivos)
 
 
 def test_peticion_con_token_incorrecto_responde_401(tmp_path: Path) -> None:
