@@ -104,3 +104,45 @@ Corrección de expectativa, no defecto: `get_document` no expone un conteo de fr
 
 Pendiente para cerrar T7: el **reinicio controlado** (requiere `sudo` con contraseña, que no está
 disponible de forma no interactiva) y el **consumidor Pi en sesión nueva**.
+
+**L4 — Causa raíz del 401 en el cliente de Pi, y cierre del consumidor.** Diagnóstico de solo lectura,
+sin tocar configuración, servicio, caché ni token.
+
+Síntoma: Pi descubría `book-text-rag` pero la conexión fallaba con `{"error":"unauthorized"}`,
+`mcp-cache.json` quedaba con `discoveryFailed: true`, y el journal registraba tres `POST /mcp` → 401 a
+las 22:52 sin intentos posteriores.
+
+Causa raíz demostrada — **la variable nunca estuvo en el proceso de Pi**:
+- `herdr.exe` PID 15776 arrancó 21:52:22; el pane `pwsh.exe` 22152 a las 21:52:23; el proceso de Pi
+  `node.exe` 5540 a las **21:52:24**. La variable de usuario se creó mucho después (después de las
+  22:35). Windows entrega el entorno al crear el proceso, así que nada nacido a las 21:52 podía verla.
+- Las tres instancias de Pi vivas arrancaron **todas a las 21:52:24**, cada una bajo un `pwsh.exe`
+  distinto: son panes del mismo Herdr. Cerrar y reabrir Pi dentro de Herdr reutiliza esos intérpretes
+  de larga vida, así que el entorno nuevo no entraba nunca en la cadena.
+- Punto exacto de la pérdida: `pi-mcp-adapter` expande los `headers` **en cada intento de conexión**
+  con `process.env` del proceso de Pi (`server-manager.ts:1703` → `utils.ts:138`); si la variable falta,
+  `utils.ts:142` produce cadena vacía y el encabezado sale como `Bearer ` sin valor. La `url` falla
+  cerrado (`utils.ts:270`), los `headers` no: de ahí el 401 silencioso en lugar de un error legible.
+- Silencio posterior: `init.ts:388` aparta del arranque las entradas con `discoveryFailed` cuyo
+  `configHash` coincide, y como `computeServerHash` (`metadata-cache.ts:147-157`) hashea los encabezados
+  **ya expandidos**, un proceso con el entorno vacío reproduce el mismo hash. No hubo un cuarto
+  intento, no un cuarto fallo.
+
+Resolución (2026-10-31, por el propietario): reinicio de **Herdr**. Cadena nueva: `pwsh.exe` 22472 y Pi
+`node.exe` 12800, ambos de 23:17:09; la variable está **presente con 64 caracteres** en el entorno de
+Pi. Sin cambios en el repositorio, en el servicio, en el caché ni en el token.
+
+Cierre del consumidor, ejercido **con el cliente propio de Pi**, no con un cliente externo:
+- `tools/list`: `search`, `get_document`, `health`, con instrucciones del servidor.
+- `health` → `status: ok`, `dependencies: []`, `available_modes: ["lexical"]`, 11 ms.
+- `search "vector database" top_k=3` → los tres `chunk_id` de referencia, **en orden**, con contenido
+  real y `section_path` completo: `graphrag-agentico:0f31856f5415:13`,
+  `huyen-ai-engineering:0cd2fc8424e5:324`, `agentic-architectural-patterns:425c95335234:466`.
+- `get_document graphrag-agentico` → siete campos, `page_count: 692`, `index_version: 6902c6191388`,
+  `status: indexed`.
+- Journal: `herramienta=health|search|get_document resultado=ok` (11, 24 y 24 ms). Los 401 totales
+  siguen en 5 y **ninguno es posterior** al reinicio: no hay credencial rechazada desde entonces.
+- `mcp-cache.json`: `discoveryFailed` ya **no** está presente para `book-text-rag`.
+
+Queda pendiente, fuera del alcance del agente: el **reinicio controlado** del servicio en la Pi, que
+requiere `sudo` con contraseña.
